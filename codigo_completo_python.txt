@@ -1,0 +1,48 @@
+﻿--- INICIO ARCHIVO: main.py ---
+from src.core.scanner import obtener_datos_pc
+from src.database.firebase_client import enviar_datos_pc
+from config.config import VERSION, DEBUG_MODE
+import time
+
+def ejecutar_agente():
+    # Mensaje de encabezado con versiÃ³n
+    if DEBUG_MODE:
+        print(f"\n--- ðŸ› ï¸ MODO DESARROLLO: Ejecutando Agente V.{VERSION} ---")
+    else:
+        print(f"\n--- Agente de Inventario V.{VERSION} ---")
+    
+    try:
+        # Escaneo
+        print("ðŸ” Escaneando hardware y usuarios...")
+        datos_hardware = obtener_datos_pc()
+        
+        # Metadata (Agregamos la versiÃ³n tambiÃ©n a los datos que suben)
+        datos_hardware["version_agente"] = VERSION
+        datos_hardware["ultima_actualizacion"] = time.strftime("%Y-%m-%d %H:%M:%S")
+        
+        # SincronizaciÃ³n
+        print(f"â˜ï¸  Sincronizando UUID: {datos_hardware['uuid']}...")
+        enviar_datos_pc(datos_hardware)
+        
+        print("âœ… SincronizaciÃ³n finalizada.")
+        
+    except Exception as e:
+        print(f"âŒ Error en la ejecuciÃ³n: {e}")
+
+if __name__ == "__main__":
+    ejecutar_agente()
+--- FIN ARCHIVO ---
+
+
+--- INICIO ARCHIVO: config.py ---
+--- FIN ARCHIVO ---
+
+
+--- INICIO ARCHIVO: scanner.py ---
+--- FIN ARCHIVO ---
+
+
+--- INICIO ARCHIVO: firebase_client.py ---
+--- FIN ARCHIVO ---
+
+
