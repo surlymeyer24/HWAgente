@@ -3,50 +3,166 @@ import platform
 import subprocess
 import os
 import requests
+import ctypes
+import ctypes.wintypes
 
-def obtener_datos_remotos():
-    # --- IP PÚBLICA ---
-    try:
-        # Intentamos con ipify, si falla probamos otro
-        ip_publica = requests.get('https://api.ipify.org', timeout=5).text
-    except:
-        try:
-            ip_publica = requests.get('https://ifconfig.me/ip', timeout=5).text
-        except:
-            ip_publica = "No disponible"
-
-    # --- ANYDESK ID ---
-    anydesk_id = "No instalado"
-    # Ruta A: Instalación de sistema
-    ruta_sistema = r'C:\ProgramData\AnyDesk\system.conf'
-    # Ruta B: Instalación de usuario
-    ruta_usuario = os.path.expandvars(r'%APPDATA%\AnyDesk\system.conf')
+def obtener_id_anydesk():
+    """
+    Obtiene el ID de AnyDesk usando el comando oficial del ejecutable.
+    Método más confiable y rápido.
+    """
+    # Rutas comunes de instalación de AnyDesk
+    posibles_rutas_exe = [
+        r"C:\Program Files (x86)\AnyDesk\AnyDesk.exe",
+        r"C:\Program Files\AnyDesk\AnyDesk.exe",
+        os.path.join(os.environ.get('ProgramData', ''), 'AnyDesk', 'AnyDesk.exe'),
+        os.path.join(os.environ.get('LOCALAPPDATA', ''), 'AnyDesk', 'AnyDesk.exe')
+    ]
     
-    for ruta in [ruta_sistema, ruta_usuario]:
+    # Buscar el ejecutable
+    anydesk_exe = None
+    for ruta in posibles_rutas_exe:
         if os.path.exists(ruta):
-            try:
-                with open(ruta, 'r', encoding='utf-8') as f:
-                    for linea in f:
-                        if 'ad.anydesk.id' in linea:
-                            anydesk_id = linea.split('=')[1].strip()
-                            break
-            except:
-                continue
+            anydesk_exe = ruta
+            break
     
-    return ip_publica, anydesk_id
+    if not anydesk_exe:
+        return "No instalado"
+    
+    try:
+        # Ejecutar comando para obtener el ID
+        resultado = subprocess.run(
+            [anydesk_exe, '--get-id'],
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+        
+        if resultado.returncode == 0:
+            anydesk_id = resultado.stdout.strip()
+            if anydesk_id and anydesk_id.isdigit():
+                return anydesk_id
+        
+        return "Error al obtener ID"
+        
+    except subprocess.TimeoutExpired:
+        return "Timeout"
+    except Exception as e:
+        return f"Error: {str(e)}"
+    
+    
+def obtener_ip_publica():
+    """
+    Intenta obtener la IP pública usando múltiples servicios.
+    Retorna la IP como string o un mensaje de error si falla todo.
+    """
+    # Lista de proveedores confiables (Redundancia)
+    servidores_ip = [
+        'https://api.ipify.org',
+        'https://checkip.amazonaws.com',
+        'https://ifconfig.me/ip'
+    ]
+    
+    for url in servidores_ip:
+        try:
+            # timeout=5 es vital: si el sitio no responde en 5 seg, pasa al siguiente
+            respuesta = requests.get(url, timeout=5)
+            if respuesta.status_code == 200:
+                # .strip() limpia espacios o saltos de línea invisibles
+                return respuesta.text.strip()
+        except Exception:
+            # Si hay error (sin internet o sitio caído), sigue con el próximo
+            continue
+            
+    return "IP no disponible (Sin conexión)"
 
 def obtener_aplicaciones_activas():
-    apps = set()
-    for proc in psutil.process_iter(['name']):
+    """
+    Obtiene aplicaciones con ventanas visibles y su consumo de recursos.
+    Agrupa por nombre de aplicación sumando todos sus procesos.
+    Retorna las top 15 por uso de CPU/RAM.
+    """
+    # Lectura previa para que cpu_percent funcione correctamente
+    for proc in psutil.process_iter():
+        try:
+            proc.cpu_percent()
+        except:
+            pass
+    
+    # Esperar un momento para tener datos
+    import time
+    time.sleep(0.5)
+    
+    apps_agrupadas = {}  # Diccionario para agrupar por nombre
+    
+    # Función de Windows para verificar si una ventana es visible
+    user32 = ctypes.windll.user32
+    
+    for proc in psutil.process_iter(['pid', 'name', 'cpu_percent', 'memory_info']):
         try:
             nombre = proc.info['name']
-            if nombre.lower().endswith('.exe'):
-                if nombre.lower() not in ['svchost.exe', 'conhost.exe', 'idle']:
-                    apps.add(nombre)
+            
+            # Filtrar procesos de sistema obvios
+            if nombre.lower() in ['svchost.exe', 'conhost.exe', 'idle', 'system', 
+                                   'registry', 'smss.exe', 'csrss.exe', 'wininit.exe',
+                                   'services.exe', 'lsass.exe', 'dwm.exe']:
+                continue
+            
+            # Verificar si tiene ventana visible
+            tiene_ventana = False
+            def callback(hwnd, _):
+                nonlocal tiene_ventana
+                if user32.IsWindowVisible(hwnd):
+                    _, pid = ctypes.wintypes.DWORD(), ctypes.wintypes.DWORD()
+                    user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+                    if pid.value == proc.info['pid']:
+                        tiene_ventana = True
+                        return False  # Detener búsqueda
+                return True
+            
+            user32.EnumWindows(ctypes.WINFUNCTYPE(
+                ctypes.c_bool, 
+                ctypes.wintypes.HWND, 
+                ctypes.wintypes.LPARAM
+            )(callback), 0)
+            
+            if tiene_ventana:
+                # Convertir bytes a MB
+                ram_mb = proc.info['memory_info'].rss / (1024 * 1024)
+                cpu_pct = proc.info['cpu_percent']
+                
+                # Agrupar por nombre
+                if nombre not in apps_agrupadas:
+                    apps_agrupadas[nombre] = {
+                        'nombre': nombre,
+                        'cpu_porcentaje': 0,
+                        'ram_mb': 0,
+                        'procesos': 0
+                    }
+                
+                # Sumar recursos
+                apps_agrupadas[nombre]['cpu_porcentaje'] += cpu_pct
+                apps_agrupadas[nombre]['ram_mb'] += ram_mb
+                apps_agrupadas[nombre]['procesos'] += 1
+                
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             continue
     
-    return sorted(list(apps))[:15] # Retorna las primeras 15 alfabéticamente
+    # Convertir a lista y redondear
+    apps_con_recursos = []
+    for app in apps_agrupadas.values():
+        apps_con_recursos.append({
+            'nombre': app['nombre'],
+            'cpu_porcentaje': round(app['cpu_porcentaje'], 1),
+            'ram_mb': round(app['ram_mb'], 1),
+            'procesos': app['procesos']
+        })
+    
+    # Ordenar por RAM (las que más consumen primero)
+    apps_con_recursos.sort(key=lambda x: x['ram_mb'], reverse=True)
+    
+    # Retornar top 15
+    return apps_con_recursos[:15]
 
 def obtener_usuarios():
     try:
@@ -72,7 +188,9 @@ def obtener_id_inventario():
         return platform.node()
 
 def obtener_datos_pc():
-    ip, anydesk_id = obtener_datos_remotos()
+    ip = obtener_ip_publica()
+    anydesk_id = obtener_id_anydesk()
+    
     datos = {
         "uuid": obtener_id_inventario(),
         "hostname": platform.node(),
