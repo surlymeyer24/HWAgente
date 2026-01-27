@@ -78,9 +78,9 @@ def obtener_ip_publica():
 
 def obtener_aplicaciones_activas():
     """
-    Obtiene aplicaciones con ventanas visibles y su consumo de recursos.
+    Obtiene aplicaciones y su consumo de recursos.
     Agrupa por nombre de aplicación sumando todos sus procesos.
-    Retorna las top 15 por uso de CPU/RAM.
+    Retorna las top 15 por uso de RAM.
     """
     # Lectura previa para que cpu_percent funcione correctamente
     for proc in psutil.process_iter():
@@ -95,10 +95,7 @@ def obtener_aplicaciones_activas():
     
     apps_agrupadas = {}  # Diccionario para agrupar por nombre
     
-    # Función de Windows para verificar si una ventana es visible
-    user32 = ctypes.windll.user32
-    
-    for proc in psutil.process_iter(['pid', 'name', 'cpu_percent', 'memory_info']):
+    for proc in psutil.process_iter(['name', 'cpu_percent', 'memory_info']):
         try:
             nombre = proc.info['name']
             
@@ -108,42 +105,23 @@ def obtener_aplicaciones_activas():
                                    'services.exe', 'lsass.exe', 'dwm.exe']:
                 continue
             
-            # Verificar si tiene ventana visible
-            tiene_ventana = False
-            def callback(hwnd, _):
-                nonlocal tiene_ventana
-                if user32.IsWindowVisible(hwnd):
-                    _, pid = ctypes.wintypes.DWORD(), ctypes.wintypes.DWORD()
-                    user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
-                    if pid.value == proc.info['pid']:
-                        tiene_ventana = True
-                        return False  # Detener búsqueda
-                return True
+            # Convertir bytes a MB
+            ram_mb = proc.info['memory_info'].rss / (1024 * 1024)
+            cpu_pct = proc.info['cpu_percent']
             
-            user32.EnumWindows(ctypes.WINFUNCTYPE(
-                ctypes.c_bool, 
-                ctypes.wintypes.HWND, 
-                ctypes.wintypes.LPARAM
-            )(callback), 0)
+            # Agrupar por nombre
+            if nombre not in apps_agrupadas:
+                apps_agrupadas[nombre] = {
+                    'nombre': nombre,
+                    'cpu_porcentaje': 0,
+                    'ram_mb': 0,
+                    'procesos': 0
+                }
             
-            if tiene_ventana:
-                # Convertir bytes a MB
-                ram_mb = proc.info['memory_info'].rss / (1024 * 1024)
-                cpu_pct = proc.info['cpu_percent']
-                
-                # Agrupar por nombre
-                if nombre not in apps_agrupadas:
-                    apps_agrupadas[nombre] = {
-                        'nombre': nombre,
-                        'cpu_porcentaje': 0,
-                        'ram_mb': 0,
-                        'procesos': 0
-                    }
-                
-                # Sumar recursos
-                apps_agrupadas[nombre]['cpu_porcentaje'] += cpu_pct
-                apps_agrupadas[nombre]['ram_mb'] += ram_mb
-                apps_agrupadas[nombre]['procesos'] += 1
+            # Sumar recursos
+            apps_agrupadas[nombre]['cpu_porcentaje'] += cpu_pct
+            apps_agrupadas[nombre]['ram_mb'] += ram_mb
+            apps_agrupadas[nombre]['procesos'] += 1
                 
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             continue
