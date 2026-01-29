@@ -20,7 +20,8 @@ def obtener_modelos_discos_fisicos():
             ['wmic', 'diskdrive', 'get', 'Index,Model'],
             capture_output=True,
             text=True,
-            timeout=10
+            timeout=10,
+            creationflags=subprocess.CREATE_NO_WINDOW
         )
         
         lineas = resultado.stdout.strip().split('\n')[1:]  # Saltar encabezado
@@ -55,7 +56,8 @@ def obtener_disco_de_particion(letra_unidad):
             ['wmic', 'logicaldisk', 'where', f'DeviceID="{letra}:"', 'assoc', '/assocclass:Win32_LogicalDiskToPartition'],
             capture_output=True,
             text=True,
-            timeout=10
+            timeout=10,
+            creationflags=subprocess.CREATE_NO_WINDOW
         )
         
         # Buscar DiskIndex en la salida
@@ -73,7 +75,8 @@ def obtener_disco_de_particion(letra_unidad):
             ['wmic', 'partition', 'where', f'Name like "%Disk #%Partition #%"', 'get', 'DiskIndex,DeviceID'],
             capture_output=True,
             text=True,
-            timeout=10
+            timeout=10,
+            creationflags=subprocess.CREATE_NO_WINDOW
         )
         
         # Este método es menos preciso pero funciona como fallback
@@ -234,7 +237,9 @@ def obtener_estado_servicios():
                 ['sc', 'query', servicio],
                 capture_output=True,
                 text=True,
-                timeout=5
+                timeout=5,
+                creationflags=subprocess.CREATE_NO_WINDOW
+                
             )
             
             estado = "Detenido"
@@ -289,7 +294,8 @@ def obtener_id_anydesk():
             [anydesk_exe, '--get-id'],
             capture_output=True,
             text=True,
-            timeout=5
+            timeout=5,
+            creationflags=subprocess.CREATE_NO_WINDOW
         )
         
         if resultado.returncode == 0:
