@@ -1,0 +1,884 @@
+﻿--- INICIO ARCHIVO: C:\Users\Usr\Documents\MiniAgente\main.py ---
+import time
+import sys
+import subprocess
+import os
+from src.core.scanner import obtener_datos_pc
+from src.database.firebase_client import enviar_datos_pc, escuchar_comandos_remotos, log_debug
+from config.config import VERSION, DEBUG_MODE
+
+# --- 1. PREVENCIÃ“N DE ERRORES EN MODO INVISIBLE ---
+if getattr(sys, 'frozen', False) and not DEBUG_MODE:
+    sys.stdin = None
+    sys.stdout = open(os.devnull, 'w')
+    sys.stderr = open(os.devnull, 'w')
+
+# --- 2. DETECCIÃ“N DE MÃ“DULOS DE SERVICIO ---
+try:
+    import win32serviceutil
+    import win32service
+    import win32event
+    import servicemanager
+    RUNNING_AS_SERVICE = True
+except ImportError:
+    RUNNING_AS_SERVICE = False
+
+# --- 3. FUNCIONES DE UTILIDAD (Deben estar antes del __main__) ---
+
+def verificar_permisos_admin():
+    """Verifica si el proceso tiene privilegios de administrador."""
+    try:
+        import ctypes
+        return ctypes.windll.shell32.IsUserAnAdmin()
+    except:
+        return False
+
+def solicitar_permisos_admin():
+    """Relanza el programa solicitando elevaciÃ³n de privilegios."""
+    import ctypes
+    if sys.argv[-1] != 'asadmin':
+        script = sys.executable
+        params = f'"{sys.argv[0]}" asadmin'
+        ctypes.windll.shell32.ShellExecuteW(None, "runas", script, params, None, 1)
+        return True
+    return False
+
+def servicio_esta_instalado():
+    """Consulta al sistema si el servicio 'AgenteMonitoreo' ya existe."""
+    try:
+        res = subprocess.run('sc query "AgenteMonitoreo"', 
+                             shell=True, capture_output=True, text=True, 
+                             creationflags=subprocess.CREATE_NO_WINDOW)
+        return "AgenteMonitoreo" in res.stdout
+    except:
+        return False
+
+def instalar_servicio_automaticamente():
+    """LÃ³gica para detener, eliminar y reinstalar el servicio desde el ejecutable actual."""
+    exe_path = sys.executable
+    subprocess.run('sc stop "AgenteMonitoreo"', shell=True, capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
+    time.sleep(1)
+    subprocess.run('sc delete "AgenteMonitoreo"', shell=True, capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
+    
+    cmd = f'sc create "AgenteMonitoreo" binPath= "{exe_path}" start= auto DisplayName= "Agente de Monitoreo IT"'
+    res = subprocess.run(cmd, shell=True, capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW)
+    
+    if "SUCCESS" in res.stdout or "CORRECTO" in res.stdout:
+        subprocess.run('sc start "AgenteMonitoreo"', shell=True, creationflags=subprocess.CREATE_NO_WINDOW)
+        return True
+    return False
+
+# --- 4. CLASE DEL SERVICIO ---
+if RUNNING_AS_SERVICE:
+    class AgenteMonitoreoService(win32serviceutil.ServiceFramework):
+        _svc_name_ = "AgenteMonitoreo"
+        _svc_display_name_ = "Agente de Monitoreo IT"
+        _svc_description_ = "SincronizaciÃ³n de hardware con Firebase."
+
+        def __init__(self, args):
+            win32serviceutil.ServiceFramework.__init__(self, args)
+            self.hWaitStop = win32event.CreateEvent(None, 0, 0, None)
+            self.running = True
+
+        def SvcStop(self):
+            self.running = False
+            win32event.SetEvent(self.hWaitStop)
+
+        def SvcDoRun(self):
+            try:
+                log_debug("Servicio iniciando ejecuciÃ³n...")
+                try:
+                    log_debug("Obteniendo datos del PC...")
+                    datos = obtener_datos_pc()
+                    log_debug(f"Datos obtenidos con UUID: {datos.get('uuid')}")
+                except Exception as e:
+                    log_debug(f"Error obteniendo datos: {e}")
+                    return
+                
+                try:
+                    log_debug("Enviando datos iniciales...")
+                    enviar_datos_pc(datos)
+                except Exception as e:
+                    log_debug(f"Error enviando datos: {e}")
+                    return
+                
+                try:
+                    log_debug("Escuchando comandos...")
+                    escuchar_comandos_remotos(datos['uuid'])
+                except Exception as e:
+                    log_debug(f"Error escuchando comandos: {e}")
+                    return
+                
+                while self.running:
+                    log_debug("Bucle principal activo...")
+                    rc = win32event.WaitForSingleObject(self.hWaitStop, 300000)
+                    if rc == win32event.WAIT_OBJECT_0:
+                        break
+                    enviar_datos_pc(obtener_datos_pc())
+            except Exception as e:
+                log_debug(f"Error general en SvcDoRun: {e}")
+
+# --- 5. PUNTO DE ENTRADA PRINCIPAL ---
+if __name__ == "__main__":
+    print("Iniciando AgenteMonitoreo...")
+    # Caso A: Comandos de instalaciÃ³n/desinstalaciÃ³n manual
+    if len(sys.argv) > 1 and sys.argv[1].lower() in ['install', 'update', 'remove', 'start', 'stop']:
+        print("Caso A: InstalaciÃ³n/desinstalaciÃ³n")
+        if RUNNING_AS_SERVICE:
+            win32serviceutil.HandleCommandLine(AgenteMonitoreoService)
+        sys.exit(0)
+
+    # Caso B: Inicio automÃ¡tico por el Service Control Manager
+    if getattr(sys, 'frozen', False) and not sys.stdout:
+        print("Caso B: Servicio SCM")
+        if RUNNING_AS_SERVICE:
+            servicemanager.Initialize()
+            servicemanager.PrepareToHostSingleService(AgenteMonitoreoService)
+            servicemanager.StartServiceCtrlDispatcher()
+        sys.exit(0)
+
+    # Caso C: Usuario ejecuta el .exe con doble clic
+    print("Caso C: EjecuciÃ³n usuario")
+    if not servicio_esta_instalado():
+        print("Servicio no instalado, instalando...")
+        if not verificar_permisos_admin():
+            print("Solicitando permisos admin...")
+            solicitar_permisos_admin()
+        else:
+            if instalar_servicio_automaticamente():
+                print("Servicio instalado y corriendo en segundo plano.")
+                time.sleep(3)
+    else:
+        print("Servicio ya instalado, iniciando...")
+        # Cambia creationflags para mostrar ventana
+        subprocess.run('sc start "AgenteMonitoreo"', shell=True)  # Remueve creationflags
+        print("Comando sc start ejecutado.")
+        sys.exit(0)
+--- FIN ARCHIVO ---
+
+
+--- INICIO ARCHIVO: C:\Users\Usr\Documents\MiniAgente\test.py ---
+from src.core.scanner import obtener_datos_pc
+from src.database.firebase_client import enviar_datos_pc, db
+import platform
+from firebase_admin import firestore
+
+try:
+    datos = obtener_datos_pc()
+    print(f"Datos: {datos}")
+    enviar_datos_pc(datos)
+    print("EnvÃ­o exitoso")
+    
+    # Crear documento en "tareas" sin listener
+    uuid_pc = datos['uuid']
+    tareas_ref = db.collection("tareas").document(uuid_pc)
+    tareas_ref.set({
+        "hostname": platform.node(),
+        "comando": "NINGUNO",
+        "ultima_conexion": firestore.SERVER_TIMESTAMP
+    }, merge=True)
+    print("Documento en 'tareas' creado")
+    
+except Exception as e:
+    print(f"Error: {e}")
+--- FIN ARCHIVO ---
+
+
+--- INICIO ARCHIVO: C:\Users\Usr\Documents\MiniAgente\config\config.py ---
+import os
+import sys
+
+def get_base_path():
+    # PyInstaller extrae archivos en sys._MEIPASS
+    if getattr(sys, 'frozen', False):
+        return sys._MEIPASS
+    # En desarrollo, sube dos niveles desde config/config.py
+    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+BASE_DIR = get_base_path()
+
+# Rutas absolutas garantizadas
+FIREBASE_JSON_PATH = os.path.join(BASE_DIR, "auth", "serviceAccountKey.json")
+FIREBASE_COLLECTION_NAME = "computadoras"
+VERSION = "1.0.0"
+DEBUG_MODE = True
+--- FIN ARCHIVO ---
+
+
+--- INICIO ARCHIVO: C:\Users\Usr\Documents\MiniAgente\config\__init__.py ---
+--- FIN ARCHIVO ---
+
+
+--- INICIO ARCHIVO: C:\Users\Usr\Documents\MiniAgente\src\__init__.py ---
+--- FIN ARCHIVO ---
+
+
+--- INICIO ARCHIVO: C:\Users\Usr\Documents\MiniAgente\src\core\scanner.py ---
+import psutil
+import platform
+import subprocess
+import os
+import requests
+import win32evtlog
+import win32evtlogutil
+import win32con
+
+
+# ==================== 1. SALUD DEL DISCO ====================
+def obtener_modelos_discos_fisicos():
+    """
+    Obtiene los modelos de los discos fÃ­sicos usando WMIC.
+    Retorna un diccionario {nÃºmero_disco: modelo}
+    """
+    modelos = {}
+    try:
+        resultado = subprocess.run(
+            ['wmic', 'diskdrive', 'get', 'Index,Model'],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            creationflags=subprocess.CREATE_NO_WINDOW
+        )
+        
+        lineas = resultado.stdout.strip().split('\n')[1:]  # Saltar encabezado
+        
+        for linea in lineas:
+            linea = linea.strip()
+            if linea:
+                # Formato: "0  HS-SSD-E3000 512G"
+                partes = linea.split(None, 1)  # Dividir en mÃ¡ximo 2 partes
+                if len(partes) == 2:
+                    indice = partes[0].strip()
+                    modelo = partes[1].strip()
+                    modelos[indice] = modelo
+                    
+    except Exception as e:
+        print(f"âš ï¸ No se pudo obtener modelos de discos: {e}")
+    
+    return modelos
+
+
+def obtener_disco_de_particion(letra_unidad):
+    """
+    Obtiene el nÃºmero de disco fÃ­sico de una letra de unidad (ej: C:)
+    Usa asociaciÃ³n desde la unidad lÃ³gica al disco fÃ­sico.
+    """
+    try:
+        # Limpiar la letra (solo queremos C, D, etc.)
+        letra = letra_unidad.replace(':', '').replace('\\', '').strip()
+        
+        # MÃ©todo 1: Probar con LogicalDisk to Partition
+        resultado = subprocess.run(
+            ['wmic', 'logicaldisk', 'where', f'DeviceID="{letra}:"', 'assoc', '/assocclass:Win32_LogicalDiskToPartition'],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            creationflags=subprocess.CREATE_NO_WINDOW
+        )
+        
+        # Buscar DiskIndex en la salida
+        for linea in resultado.stdout.split('\n'):
+            if 'Disk #' in linea:
+                # Formato: "Disk #0, Partition #0"
+                try:
+                    disk_num = linea.split('Disk #')[1].split(',')[0].strip()
+                    return disk_num
+                except:
+                    pass
+        
+        # MÃ©todo 2: Si fallÃ³, intentar con partition directamente
+        resultado2 = subprocess.run(
+            ['wmic', 'partition', 'where', f'Name like "%Disk #%Partition #%"', 'get', 'DiskIndex,DeviceID'],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            creationflags=subprocess.CREATE_NO_WINDOW
+        )
+        
+        # Este mÃ©todo es menos preciso pero funciona como fallback
+        # Si solo hay un disco, asumimos que es el 0
+        if resultado2.returncode == 0:
+            return "0"
+            
+    except Exception as e:
+        print(f"âš ï¸ Error obteniendo disco de particiÃ³n {letra_unidad}: {e}")
+    
+    return None
+
+
+def obtener_salud_discos():
+    """
+    Obtiene informaciÃ³n detallada de espacio en disco con modelo fÃ­sico.
+    """
+    # Primero obtener todos los modelos de discos fÃ­sicos
+    modelos_discos = obtener_modelos_discos_fisicos()
+    
+    discos = []
+    for partition in psutil.disk_partitions():
+        if 'fixed' not in partition.opts:
+            continue
+            
+        try:
+            uso = psutil.disk_usage(partition.mountpoint)
+            
+            # Obtener modelo del disco fÃ­sico
+            letra = partition.device
+            disco_index = obtener_disco_de_particion(letra)
+            modelo = modelos_discos.get(disco_index, "Desconocido") if disco_index else "Desconocido"
+            
+            discos.append({
+                "dispositivo": partition.device,
+                "punto_montaje": partition.mountpoint,
+                "modelo_disco": modelo,
+                "total_gb": round(uso.total / (1024 ** 3), 2),
+                "usado_gb": round(uso.used / (1024 ** 3), 2),
+                "libre_gb": round(uso.free / (1024 ** 3), 2),
+                "porcentaje_usado": uso.percent
+            })
+        except PermissionError:
+            continue
+    
+    return discos
+
+# ==================== 4. RED ====================
+def obtener_info_red():
+    """
+    Obtiene informaciÃ³n de red: adaptadores activos y estadÃ­sticas.
+    """
+    adaptadores = []
+    stats = psutil.net_if_stats()
+    addrs = psutil.net_if_addrs()
+    
+    for interfaz, datos in stats.items():
+        if datos.isup:  # Solo interfaces activas
+            ips = []
+            if interfaz in addrs:
+                for addr in addrs[interfaz]:
+                    if addr.family == 2:  # AF_INET (IPv4)
+                        ips.append(addr.address)
+            
+            adaptadores.append({
+                "nombre": interfaz,
+                "activo": datos.isup,
+                "velocidad_mbps": datos.speed if datos.speed > 0 else "Desconocida",
+                "ips": ips
+            })
+    
+    # EstadÃ­sticas de trÃ¡fico
+    net_io = psutil.net_io_counters()
+    trafico = {
+        "bytes_enviados_mb": round(net_io.bytes_sent / (1024 ** 2), 2),
+        "bytes_recibidos_mb": round(net_io.bytes_recv / (1024 ** 2), 2),
+        "paquetes_enviados": net_io.packets_sent,
+        "paquetes_recibidos": net_io.packets_recv,
+        "errores_entrada": net_io.errin,
+        "errores_salida": net_io.errout
+    }
+    
+    return {
+        "adaptadores": adaptadores,
+        "trafico": trafico
+    }
+
+
+# ==================== 5. ERRORES DEL SISTEMA ====================
+def obtener_errores_sistema(limite=10):
+    """
+    Obtiene los Ãºltimos errores del Event Viewer de Windows.
+    Solo errores crÃ­ticos y errores de las Ãºltimas 24 horas.
+    """
+    errores = []
+    
+    try:
+        # Abrir el log de sistema
+        hand = win32evtlog.OpenEventLog(None, "System")
+        flags = win32evtlog.EVENTLOG_BACKWARDS_READ | win32evtlog.EVENTLOG_SEQUENTIAL_READ
+        
+        eventos = win32evtlog.ReadEventLog(hand, flags, 0)
+        
+        for evento in eventos[:100]:  # Revisar Ãºltimos 100 eventos
+            # Solo errores (tipo 1) y crÃ­ticos (tipo 16)
+            if evento.EventType in [win32con.EVENTLOG_ERROR_TYPE, 
+                                     win32con.EVENTLOG_WARNING_TYPE]:
+                
+                try:
+                    mensaje = win32evtlogutil.SafeFormatMessage(evento, "System")
+                    if mensaje:
+                        # Limitar longitud del mensaje
+                        mensaje = mensaje[:200] + "..." if len(mensaje) > 200 else mensaje
+                    else:
+                        mensaje = "Sin descripciÃ³n"
+                except:
+                    mensaje = "Error al leer mensaje"
+                
+                errores.append({
+                    "fecha": evento.TimeGenerated.Format(),
+                    "tipo": "Error" if evento.EventType == win32con.EVENTLOG_ERROR_TYPE else "Advertencia",
+                    "fuente": evento.SourceName,
+                    "evento_id": evento.EventID,
+                    "mensaje": mensaje
+                })
+                
+                if len(errores) >= limite:
+                    break
+        
+        win32evtlog.CloseEventLog(hand)
+        
+    except Exception as e:
+        errores.append({
+            "error": f"No se pudo leer Event Viewer: {str(e)}"
+        })
+    
+    return errores
+
+
+# ==================== 6. ESTADO DE SERVICIOS CRÃTICOS ====================
+def obtener_estado_servicios():
+    """
+    Verifica el estado de servicios crÃ­ticos de seguridad.
+    """
+    servicios_criticos = {
+        "WinDefend": "Windows Defender",
+        "wuauserv": "Windows Update",
+        "mpssvc": "Firewall de Windows",
+        "wscsvc": "Centro de seguridad"
+    }
+    
+    estados = []
+    
+    for servicio, nombre in servicios_criticos.items():
+        try:
+            # Usar sc query para verificar estado
+            resultado = subprocess.run(
+                ['sc', 'query', servicio],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                creationflags=subprocess.CREATE_NO_WINDOW
+                
+            )
+            
+            estado = "Detenido"
+            if "RUNNING" in resultado.stdout:
+                estado = "En ejecuciÃ³n"
+            elif "STOPPED" in resultado.stdout:
+                estado = "Detenido"
+            elif "PAUSED" in resultado.stdout:
+                estado = "Pausado"
+            
+            estados.append({
+                "servicio": nombre,
+                "estado": estado,
+                "critico": estado != "En ejecuciÃ³n"
+            })
+            
+        except Exception as e:
+            estados.append({
+                "servicio": nombre,
+                "estado": f"Error: {str(e)}",
+                "critico": True
+            })
+    
+    return estados
+
+def obtener_id_anydesk():
+    """
+    Obtiene el ID de AnyDesk usando el comando oficial del ejecutable.
+    MÃ©todo mÃ¡s confiable y rÃ¡pido.
+    """
+    # Rutas comunes de instalaciÃ³n de AnyDesk
+    posibles_rutas_exe = [
+        r"C:\Program Files (x86)\AnyDesk\AnyDesk.exe",
+        r"C:\Program Files\AnyDesk\AnyDesk.exe",
+        os.path.join(os.environ.get('ProgramData', ''), 'AnyDesk', 'AnyDesk.exe'),
+        os.path.join(os.environ.get('LOCALAPPDATA', ''), 'AnyDesk', 'AnyDesk.exe')
+    ]
+    
+    # Buscar el ejecutable
+    anydesk_exe = None
+    for ruta in posibles_rutas_exe:
+        if os.path.exists(ruta):
+            anydesk_exe = ruta
+            break
+    
+    if not anydesk_exe:
+        return "No instalado"
+    
+    try:
+        # Ejecutar comando para obtener el ID
+        resultado = subprocess.run(
+            [anydesk_exe, '--get-id'],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            creationflags=subprocess.CREATE_NO_WINDOW
+        )
+        
+        if resultado.returncode == 0:
+            anydesk_id = resultado.stdout.strip()
+            if anydesk_id and anydesk_id.isdigit():
+                return anydesk_id
+        
+        return "Error al obtener ID"
+        
+    except subprocess.TimeoutExpired:
+        return "Timeout"
+    except Exception as e:
+        return f"Error: {str(e)}"
+    
+    
+def obtener_ip_publica():
+    """
+    Intenta obtener la IP pÃºblica usando mÃºltiples servicios.
+    Retorna la IP como string o un mensaje de error si falla todo.
+    """
+    # Lista de proveedores confiables (Redundancia)
+    servidores_ip = [
+        'https://api.ipify.org',
+        'https://checkip.amazonaws.com',
+        'https://ifconfig.me/ip'
+    ]
+    
+    for url in servidores_ip:
+        try:
+            # timeout=5 es vital: si el sitio no responde en 5 seg, pasa al siguiente
+            respuesta = requests.get(url, timeout=5)
+            if respuesta.status_code == 200:
+                # .strip() limpia espacios o saltos de lÃ­nea invisibles
+                return respuesta.text.strip()
+        except Exception:
+            # Si hay error (sin internet o sitio caÃ­do), sigue con el prÃ³ximo
+            continue
+            
+    return "IP no disponible (Sin conexiÃ³n)"
+
+def obtener_aplicaciones_activas():
+    """
+    Obtiene aplicaciones usando Performance Counters de Windows (exacto como Admin de Tareas)
+    Incluye descripciÃ³n del producto desde metadatos del ejecutable
+    """
+    import json
+    
+    # Script de PowerShell con el contador correcto en espaÃ±ol
+    powershell_script = """
+    $apps = @{}
+    
+    # Obtener memoria privada (exactamente lo que muestra Admin de Tareas)
+    Get-Counter '\\Proceso(*)\\Espacio de trabajo - Privado' -ErrorAction SilentlyContinue | 
+        Select-Object -ExpandProperty CounterSamples | 
+        ForEach-Object {
+            $name = $_.InstanceName
+            # Ignorar procesos del sistema
+            if ($name -notin @('idle','_total','system')) {
+                if (-not $apps.ContainsKey($name)) {
+                    # Obtener descripciÃ³n del producto
+                    $description = $name
+                    try {
+                        $proc = Get-Process -Name $name -ErrorAction SilentlyContinue | Select-Object -First 1
+                        if ($proc -and $proc.Path) {
+                            $fileInfo = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($proc.Path)
+                            if ($fileInfo.FileDescription) {
+                                $description = $fileInfo.FileDescription
+                            }
+                        }
+                    } catch {}
+                    
+                    $apps[$name] = @{
+                        Description = $description
+                        RAM = 0
+                        Count = 0
+                    }
+                }
+                $apps[$name].RAM += $_.CookedValue
+                $apps[$name].Count += 1
+            }
+        }
+    
+    # Convertir a lista y formatear
+    $result = $apps.GetEnumerator() | ForEach-Object {
+        [PSCustomObject]@{
+            Name = $_.Key + '.exe'
+            Description = $_.Value.Description
+            RAM_MB = [math]::Round($_.Value.RAM / 1MB, 1)
+            Processes = $_.Value.Count
+        }
+    } | Where-Object { $_.RAM_MB -gt 5 } | Sort-Object RAM_MB -Descending | Select-Object -First 15
+    
+    $result | ConvertTo-Json
+    """
+    
+    try:
+        resultado = subprocess.run(
+            ['powershell', '-NoProfile', '-Command', powershell_script],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
+        )
+        
+        if resultado.returncode == 0 and resultado.stdout.strip():
+            datos = json.loads(resultado.stdout)
+            
+            # Si es un solo objeto, convertir a lista
+            if isinstance(datos, dict):
+                datos = [datos]
+            
+            # Formatear para Firebase
+            apps_formateadas = []
+            for app in datos:
+                apps_formateadas.append({
+                    'nombre': app['Name'],
+                    'descripcion': app.get('Description', app['Name']),
+                    'cpu_porcentaje': 0,
+                    'ram_mb': app['RAM_MB'],
+                    'procesos': app['Processes']
+                })
+            
+            # Agregar CPU con psutil (rÃ¡pido)
+            cpu_data = {}
+            for proc in psutil.process_iter(['name']):
+                try:
+                    proc.cpu_percent()
+                except:
+                    pass
+            
+            import time
+            time.sleep(0.3)
+            
+            for proc in psutil.process_iter(['name', 'cpu_percent']):
+                try:
+                    nombre = proc.info['name']
+                    if nombre not in cpu_data:
+                        cpu_data[nombre] = 0
+                    cpu_data[nombre] += proc.info['cpu_percent']
+                except:
+                    pass
+            
+            # Combinar CPU con los datos de RAM
+            for app in apps_formateadas:
+                nombre_sin_exe = app['nombre'].replace('.exe', '.exe')
+                if nombre_sin_exe in cpu_data:
+                    app['cpu_porcentaje'] = round(cpu_data[nombre_sin_exe], 1)
+            
+            return apps_formateadas
+        
+    except Exception as e:
+        print(f"âš ï¸ Error con Performance Counters: {e}")
+    
+    # Fallback a psutil
+    return obtener_aplicaciones_activas_fallback()
+    
+    # Fallback: usar el mÃ©todo anterior si PowerShell falla
+    return obtener_aplicaciones_activas_fallback()
+
+
+def obtener_aplicaciones_activas_fallback():
+    """
+    MÃ©todo de respaldo usando psutil si PowerShell falla.
+    """
+    apps_agrupadas = {}
+    
+    for proc in psutil.process_iter(['name']):
+        try:
+            proc.cpu_percent()
+        except:
+            pass
+    
+    import time
+    time.sleep(0.5)
+    
+    for proc in psutil.process_iter(['name', 'cpu_percent', 'memory_info']):
+        try:
+            nombre = proc.info['name']
+            
+            if nombre.lower() in ['svchost.exe', 'conhost.exe', 'idle', 'system', 
+                                   'registry', 'smss.exe', 'csrss.exe', 'wininit.exe',
+                                   'services.exe', 'lsass.exe', 'dwm.exe']:
+                continue
+            
+            ram_mb = proc.info['memory_info'].rss / (1024 * 1024)
+            cpu_pct = proc.info['cpu_percent']
+            
+            if nombre not in apps_agrupadas:
+                apps_agrupadas[nombre] = {
+                    'nombre': nombre,
+                    'cpu_porcentaje': 0,
+                    'ram_mb': 0,
+                    'procesos': 0
+                }
+            
+            apps_agrupadas[nombre]['cpu_porcentaje'] += cpu_pct
+            apps_agrupadas[nombre]['ram_mb'] += ram_mb
+            apps_agrupadas[nombre]['procesos'] += 1
+                
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            continue
+    
+    apps_con_recursos = []
+    for app in apps_agrupadas.values():
+        apps_con_recursos.append({
+            'nombre': app['nombre'],
+            'cpu_porcentaje': round(app['cpu_porcentaje'], 1),
+            'ram_mb': round(app['ram_mb'], 1),
+            'procesos': app['procesos']
+        })
+    
+    apps_con_recursos.sort(key=lambda x: x['ram_mb'], reverse=True)
+    return apps_con_recursos[:15]
+
+def obtener_usuarios():
+    try:
+        usuario_actual = os.getlogin()
+        
+        usuarios_activos = [u.name for u in psutil.users()]
+        
+        return {
+            "usuario_actual": usuario_actual,
+            "usuarios_activos": list(set(usuarios_activos))
+        }
+    except Exception:
+        return {"usuario_actual": "Desconocido", "usuarios_activos": [] }
+
+def obtener_id_inventario():
+    try:
+        cmd = 'wmic csproduct get uuid'
+        resultado = subprocess.check_output(cmd, shell=True).decode().split('\n')
+        uuid = resultado[1].strip()
+        return uuid
+    except Exception as e:
+        print(f"Error obteniendo UUID: {e}")
+        return platform.node()
+
+def obtener_datos_pc():
+    """
+    FunciÃ³n principal con todos los datos extendidos.
+    """
+    from src.core.scanner import (
+        obtener_ip_publica, 
+        obtener_id_anydesk, 
+        obtener_id_inventario,
+        obtener_aplicaciones_activas,
+        obtener_usuarios
+    )
+    
+    ip = obtener_ip_publica()
+    anydesk_id = obtener_id_anydesk()
+    
+    datos = {
+        "uuid": obtener_id_inventario(),
+        "hostname": platform.node(),
+        "sistema_operativo": f"{platform.system()} {platform.release()}",
+        "arquitectura": platform.machine(),
+        "ip_publica": ip,
+        "anydesk_id": anydesk_id,
+        "aplicaciones_activas": obtener_aplicaciones_activas(),
+        "procesador": platform.processor(),
+        "nucleos_fisicos": psutil.cpu_count(logical=False),
+        "ram_total_gb": round(psutil.virtual_memory().total / (1024 ** 3), 2),
+        "cpu_uso_porcentaje": psutil.cpu_percent(interval=1),
+        "ram_uso_porcentaje": psutil.virtual_memory().percent,
+        "usuarios": obtener_usuarios(),
+        
+        # NUEVOS DATOS
+        "discos": obtener_salud_discos(),
+        "red": obtener_info_red(),
+        "errores_recientes": obtener_errores_sistema(limite=10),
+        "servicios_criticos": obtener_estado_servicios()
+    }
+    
+    return datos
+--- FIN ARCHIVO ---
+
+
+--- INICIO ARCHIVO: C:\Users\Usr\Documents\MiniAgente\src\core\__init__.py ---
+--- FIN ARCHIVO ---
+
+
+--- INICIO ARCHIVO: C:\Users\Usr\Documents\MiniAgente\src\database\firebase_client.py ---
+import firebase_admin
+from firebase_admin import credentials, firestore
+import os
+import platform
+import time
+import sys
+
+def log_debug(mensaje):
+    try:
+        # Intenta escribir en C:\ para persistencia como servicio
+        path = "C:\\agente_debug.txt" if os.path.exists("C:\\") else "agente_debug.txt"
+        with open(path, "a", encoding='utf-8') as f:
+            f.write(f"{time.ctime()}: [Firebase] {mensaje}\n")
+    except:
+        pass
+
+# ImportaciÃ³n robusta de configuraciÃ³n
+try:
+    import config.config as cfg
+    FIREBASE_JSON_PATH = cfg.FIREBASE_JSON_PATH
+    FIREBASE_COLLECTION_NAME = cfg.FIREBASE_COLLECTION_NAME
+except:
+    base = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
+    FIREBASE_JSON_PATH = os.path.join(base, "auth", "serviceAccountKey.json")
+    FIREBASE_COLLECTION_NAME = "computadoras"
+
+# InicializaciÃ³n Ãºnica
+if not firebase_admin._apps:
+    try:
+        if not os.path.exists(FIREBASE_JSON_PATH):
+            log_debug(f"ERROR: No existe el JSON en {FIREBASE_JSON_PATH}")
+        cred = credentials.Certificate(FIREBASE_JSON_PATH)
+        firebase_admin.initialize_app(cred)
+        log_debug("ConexiÃ³n establecida con Firebase")
+    except Exception as e:
+        log_debug(f"Fallo crÃ­tico de conexiÃ³n: {str(e)}")
+        sys.exit(1)
+
+db = firestore.client()
+
+def enviar_datos_pc(datos):
+    try:
+        document_id = datos.get("uuid")
+        if not document_id: return
+        datos["ultima_sincronizacion"] = firestore.SERVER_TIMESTAMP
+        db.collection(FIREBASE_COLLECTION_NAME).document(document_id).set(datos)
+        log_debug(f"Datos sincronizados: {document_id}")
+    except Exception as e:
+        log_debug(f"Error enviando datos: {e}")
+
+def escuchar_comandos_remotos(uuid_pc):
+    tareas_ref = db.collection("tareas").document(uuid_pc)
+    try:
+        tareas_ref.set({
+            "hostname": platform.node(),
+            "comando": "NINGUNO",
+            "ultima_conexion": firestore.SERVER_TIMESTAMP
+        }, merge=True)
+    except Exception as e:
+        log_debug(f"Error en listener: {e}")
+        return
+
+    def on_snapshot(doc_snapshot, changes, read_time):
+        from src.core.scanner import obtener_datos_pc
+        for change in changes:
+            if change.type.name in ['ADDED', 'MODIFIED']:
+                data = change.document.to_dict()
+                if data and data.get('comando') == "ACTUALIZAR_DATOS":
+                    log_debug("Comando recibido: ACTUALIZAR_DATOS")
+                    tareas_ref.update({"comando": "PROCESANDO..."})
+                    try:
+                        nuevos_datos = obtener_datos_pc()
+                        enviar_datos_pc(nuevos_datos)
+                        tareas_ref.update({
+                            "comando": "PROCESADO",
+                            "fecha_comando_ejecutado": firestore.SERVER_TIMESTAMP
+                        })
+                    except Exception as e:
+                        log_debug(f"Error comando: {e}")
+    tareas_ref.on_snapshot(on_snapshot)
+--- FIN ARCHIVO ---
+
+
+--- INICIO ARCHIVO: C:\Users\Usr\Documents\MiniAgente\src\database\__init__.py ---
+--- FIN ARCHIVO ---
+
+
