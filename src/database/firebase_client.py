@@ -57,7 +57,7 @@ def escuchar_comandos_remotos(uuid_pc):
                     print("🔄 Pedido de actualización remota...")
                     
                     # IMPORTACIÓN LOCAL (Preventiva)
-                    from src.core.scanner import obtener_datos_pc 
+                    from src.core.scanner import obtener_datos_pc
                     
                     nuevos_datos = obtener_datos_pc()
                     
