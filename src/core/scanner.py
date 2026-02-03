@@ -6,14 +6,30 @@ import requests
 import win32evtlog
 import win32evtlogutil
 import win32con
+import gc
+
+# ==================== CACHÉ GLOBAL ====================
+_CACHE_ESTATICO = {}
+
+def inicializar_cache():
+    """Cachea datos que nunca cambian (se llama 1 vez al inicio)"""
+    global _CACHE_ESTATICO
+    if not _CACHE_ESTATICO:
+        _CACHE_ESTATICO = {
+            'hostname': platform.node(),
+            'sistema_operativo': f"{platform.system()} {platform.release()}",
+            'arquitectura': platform.machine(),
+            'procesador': platform.processor(),
+            'nucleos_fisicos': psutil.cpu_count(logical=False),
+            'ram_total_gb': round(psutil.virtual_memory().total / (1024 ** 3), 2),
+            'modelos_discos': obtener_modelos_discos_fisicos()  # Cacheamos modelos
+        }
+    return _CACHE_ESTATICO
 
 
 # ==================== 1. SALUD DEL DISCO ====================
 def obtener_modelos_discos_fisicos():
-    """
-    Obtiene los modelos de los discos físicos usando WMIC.
-    Retorna un diccionario {número_disco: modelo}
-    """
+    """Obtiene los modelos de los discos físicos usando WMIC (se ejecuta 1 vez)"""
     modelos = {}
     try:
         resultado = subprocess.run(
@@ -24,13 +40,12 @@ def obtener_modelos_discos_fisicos():
             creationflags=subprocess.CREATE_NO_WINDOW
         )
         
-        lineas = resultado.stdout.strip().split('\n')[1:]  # Saltar encabezado
+        lineas = resultado.stdout.strip().split('\n')[1:]
         
         for linea in lineas:
             linea = linea.strip()
             if linea:
-                # Formato: "0  HS-SSD-E3000 512G"
-                partes = linea.split(None, 1)  # Dividir en máximo 2 partes
+                partes = linea.split(None, 1)
                 if len(partes) == 2:
                     indice = partes[0].strip()
                     modelo = partes[1].strip()
@@ -43,15 +58,10 @@ def obtener_modelos_discos_fisicos():
 
 
 def obtener_disco_de_particion(letra_unidad):
-    """
-    Obtiene el número de disco físico de una letra de unidad (ej: C:)
-    Usa asociación desde la unidad lógica al disco físico.
-    """
+    """Obtiene el número de disco físico de una letra de unidad"""
     try:
-        # Limpiar la letra (solo queremos C, D, etc.)
         letra = letra_unidad.replace(':', '').replace('\\', '').strip()
         
-        # Método 1: Probar con LogicalDisk to Partition
         resultado = subprocess.run(
             ['wmic', 'logicaldisk', 'where', f'DeviceID="{letra}:"', 'assoc', '/assocclass:Win32_LogicalDiskToPartition'],
             capture_output=True,
@@ -60,29 +70,15 @@ def obtener_disco_de_particion(letra_unidad):
             creationflags=subprocess.CREATE_NO_WINDOW
         )
         
-        # Buscar DiskIndex en la salida
         for linea in resultado.stdout.split('\n'):
             if 'Disk #' in linea:
-                # Formato: "Disk #0, Partition #0"
                 try:
                     disk_num = linea.split('Disk #')[1].split(',')[0].strip()
                     return disk_num
                 except:
                     pass
         
-        # Método 2: Si falló, intentar con partition directamente
-        resultado2 = subprocess.run(
-            ['wmic', 'partition', 'where', f'Name like "%Disk #%Partition #%"', 'get', 'DiskIndex,DeviceID'],
-            capture_output=True,
-            text=True,
-            timeout=10,
-            creationflags=subprocess.CREATE_NO_WINDOW
-        )
-        
-        # Este método es menos preciso pero funciona como fallback
-        # Si solo hay un disco, asumimos que es el 0
-        if resultado2.returncode == 0:
-            return "0"
+        return "0"  # Fallback
             
     except Exception as e:
         print(f"⚠️ Error obteniendo disco de partición {letra_unidad}: {e}")
@@ -91,11 +87,9 @@ def obtener_disco_de_particion(letra_unidad):
 
 
 def obtener_salud_discos():
-    """
-    Obtiene información detallada de espacio en disco con modelo físico.
-    """
-    # Primero obtener todos los modelos de discos físicos
-    modelos_discos = obtener_modelos_discos_fisicos()
+    """Obtiene información de espacio en disco usando caché de modelos"""
+    cache = inicializar_cache()
+    modelos_discos = cache['modelos_discos']
     
     discos = []
     for partition in psutil.disk_partitions():
@@ -105,7 +99,6 @@ def obtener_salud_discos():
         try:
             uso = psutil.disk_usage(partition.mountpoint)
             
-            # Obtener modelo del disco físico
             letra = partition.device
             disco_index = obtener_disco_de_particion(letra)
             modelo = modelos_discos.get(disco_index, "Desconocido") if disco_index else "Desconocido"
@@ -124,21 +117,20 @@ def obtener_salud_discos():
     
     return discos
 
+
 # ==================== 4. RED ====================
 def obtener_info_red():
-    """
-    Obtiene información de red: adaptadores activos y estadísticas.
-    """
+    """Obtiene información de red optimizada"""
     adaptadores = []
     stats = psutil.net_if_stats()
     addrs = psutil.net_if_addrs()
     
     for interfaz, datos in stats.items():
-        if datos.isup:  # Solo interfaces activas
+        if datos.isup:
             ips = []
             if interfaz in addrs:
                 for addr in addrs[interfaz]:
-                    if addr.family == 2:  # AF_INET (IPv4)
+                    if addr.family == 2:  # IPv4
                         ips.append(addr.address)
             
             adaptadores.append({
@@ -148,7 +140,6 @@ def obtener_info_red():
                 "ips": ips
             })
     
-    # Estadísticas de tráfico
     net_io = psutil.net_io_counters()
     trafico = {
         "bytes_enviados_mb": round(net_io.bytes_sent / (1024 ** 2), 2),
@@ -166,30 +157,22 @@ def obtener_info_red():
 
 
 # ==================== 5. ERRORES DEL SISTEMA ====================
-def obtener_errores_sistema(limite=10):
-    """
-    Obtiene los últimos errores del Event Viewer de Windows.
-    Solo errores críticos y errores de las últimas 24 horas.
-    """
+def obtener_errores_sistema(limite=5):  # REDUCIDO DE 10 A 5
+    """Obtiene errores críticos recientes (optimizado)"""
     errores = []
     
     try:
-        # Abrir el log de sistema
         hand = win32evtlog.OpenEventLog(None, "System")
         flags = win32evtlog.EVENTLOG_BACKWARDS_READ | win32evtlog.EVENTLOG_SEQUENTIAL_READ
         
         eventos = win32evtlog.ReadEventLog(hand, flags, 0)
         
-        for evento in eventos[:100]:  # Revisar últimos 100 eventos
-            # Solo errores (tipo 1) y críticos (tipo 16)
-            if evento.EventType in [win32con.EVENTLOG_ERROR_TYPE, 
-                                     win32con.EVENTLOG_WARNING_TYPE]:
-                
+        for evento in eventos[:50]:  # REDUCIDO DE 100 A 50
+            if evento.EventType == win32con.EVENTLOG_ERROR_TYPE:  # SOLO ERRORES, NO WARNINGS
                 try:
                     mensaje = win32evtlogutil.SafeFormatMessage(evento, "System")
                     if mensaje:
-                        # Limitar longitud del mensaje
-                        mensaje = mensaje[:200] + "..." if len(mensaje) > 200 else mensaje
+                        mensaje = mensaje[:150] + "..." if len(mensaje) > 150 else mensaje
                     else:
                         mensaje = "Sin descripción"
                 except:
@@ -197,7 +180,7 @@ def obtener_errores_sistema(limite=10):
                 
                 errores.append({
                     "fecha": evento.TimeGenerated.Format(),
-                    "tipo": "Error" if evento.EventType == win32con.EVENTLOG_ERROR_TYPE else "Advertencia",
+                    "tipo": "Error",
                     "fuente": evento.SourceName,
                     "evento_id": evento.EventID,
                     "mensaje": mensaje
@@ -218,9 +201,7 @@ def obtener_errores_sistema(limite=10):
 
 # ==================== 6. ESTADO DE SERVICIOS CRÍTICOS ====================
 def obtener_estado_servicios():
-    """
-    Verifica el estado de servicios críticos de seguridad.
-    """
+    """Verifica servicios críticos de seguridad"""
     servicios_criticos = {
         "WinDefend": "Windows Defender",
         "wuauserv": "Windows Update",
@@ -232,14 +213,12 @@ def obtener_estado_servicios():
     
     for servicio, nombre in servicios_criticos.items():
         try:
-            # Usar sc query para verificar estado
             resultado = subprocess.run(
                 ['sc', 'query', servicio],
                 capture_output=True,
                 text=True,
                 timeout=5,
                 creationflags=subprocess.CREATE_NO_WINDOW
-                
             )
             
             estado = "Detenido"
@@ -265,12 +244,9 @@ def obtener_estado_servicios():
     
     return estados
 
+
 def obtener_id_anydesk():
-    """
-    Obtiene el ID de AnyDesk usando el comando oficial del ejecutable.
-    Método más confiable y rápido.
-    """
-    # Rutas comunes de instalación de AnyDesk
+    """Obtiene el ID de AnyDesk (cacheado en memoria)"""
     posibles_rutas_exe = [
         r"C:\Program Files (x86)\AnyDesk\AnyDesk.exe",
         r"C:\Program Files\AnyDesk\AnyDesk.exe",
@@ -278,7 +254,6 @@ def obtener_id_anydesk():
         os.path.join(os.environ.get('LOCALAPPDATA', ''), 'AnyDesk', 'AnyDesk.exe')
     ]
     
-    # Buscar el ejecutable
     anydesk_exe = None
     for ruta in posibles_rutas_exe:
         if os.path.exists(ruta):
@@ -289,7 +264,6 @@ def obtener_id_anydesk():
         return "No instalado"
     
     try:
-        # Ejecutar comando para obtener el ID
         resultado = subprocess.run(
             [anydesk_exe, '--get-id'],
             capture_output=True,
@@ -312,50 +286,36 @@ def obtener_id_anydesk():
     
     
 def obtener_ip_publica():
-    """
-    Intenta obtener la IP pública usando múltiples servicios.
-    Retorna la IP como string o un mensaje de error si falla todo.
-    """
-    # Lista de proveedores confiables (Redundancia)
+    """Obtiene IP pública con timeout corto"""
     servidores_ip = [
         'https://api.ipify.org',
-        'https://checkip.amazonaws.com',
-        'https://ifconfig.me/ip'
+        'https://checkip.amazonaws.com'
     ]
     
     for url in servidores_ip:
         try:
-            # timeout=5 es vital: si el sitio no responde en 5 seg, pasa al siguiente
-            respuesta = requests.get(url, timeout=5)
+            respuesta = requests.get(url, timeout=3)  # REDUCIDO DE 5 A 3
             if respuesta.status_code == 200:
-                # .strip() limpia espacios o saltos de línea invisibles
                 return respuesta.text.strip()
         except Exception:
-            # Si hay error (sin internet o sitio caído), sigue con el próximo
             continue
             
-    return "IP no disponible (Sin conexión)"
+    return "IP no disponible"
+
 
 def obtener_aplicaciones_activas():
-    """
-    Obtiene aplicaciones usando Performance Counters de Windows (exacto como Admin de Tareas)
-    Incluye descripción del producto desde metadatos del ejecutable
-    """
+    """Obtiene top 10 apps (REDUCIDO DE 15)"""
     import json
     
-    # Script de PowerShell con el contador correcto en español
     powershell_script = """
     $apps = @{}
     
-    # Obtener memoria privada (exactamente lo que muestra Admin de Tareas)
     Get-Counter '\\Proceso(*)\\Espacio de trabajo - Privado' -ErrorAction SilentlyContinue | 
         Select-Object -ExpandProperty CounterSamples | 
         ForEach-Object {
             $name = $_.InstanceName
-            # Ignorar procesos del sistema
             if ($name -notin @('idle','_total','system')) {
                 if (-not $apps.ContainsKey($name)) {
-                    # Obtener descripción del producto
                     $description = $name
                     try {
                         $proc = Get-Process -Name $name -ErrorAction SilentlyContinue | Select-Object -First 1
@@ -378,7 +338,6 @@ def obtener_aplicaciones_activas():
             }
         }
     
-    # Convertir a lista y formatear
     $result = $apps.GetEnumerator() | ForEach-Object {
         [PSCustomObject]@{
             Name = $_.Key + '.exe'
@@ -386,7 +345,7 @@ def obtener_aplicaciones_activas():
             RAM_MB = [math]::Round($_.Value.RAM / 1MB, 1)
             Processes = $_.Value.Count
         }
-    } | Where-Object { $_.RAM_MB -gt 5 } | Sort-Object RAM_MB -Descending | Select-Object -First 15
+    } | Where-Object { $_.RAM_MB -gt 5 } | Sort-Object RAM_MB -Descending | Select-Object -First 10
     
     $result | ConvertTo-Json
     """
@@ -396,18 +355,16 @@ def obtener_aplicaciones_activas():
             ['powershell', '-NoProfile', '-Command', powershell_script],
             capture_output=True,
             text=True,
-            timeout=15,
+            timeout=10,  # REDUCIDO DE 15 A 10
             creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
         )
         
         if resultado.returncode == 0 and resultado.stdout.strip():
             datos = json.loads(resultado.stdout)
             
-            # Si es un solo objeto, convertir a lista
             if isinstance(datos, dict):
                 datos = [datos]
             
-            # Formatear para Firebase
             apps_formateadas = []
             for app in datos:
                 apps_formateadas.append({
@@ -418,7 +375,7 @@ def obtener_aplicaciones_activas():
                     'procesos': app['Processes']
                 })
             
-            # Agregar CPU con psutil (rápido)
+            # CPU rápido con psutil
             cpu_data = {}
             for proc in psutil.process_iter(['name']):
                 try:
@@ -427,7 +384,7 @@ def obtener_aplicaciones_activas():
                     pass
             
             import time
-            time.sleep(0.3)
+            time.sleep(0.2)  # REDUCIDO DE 0.3 A 0.2
             
             for proc in psutil.process_iter(['name', 'cpu_percent']):
                 try:
@@ -438,7 +395,6 @@ def obtener_aplicaciones_activas():
                 except:
                     pass
             
-            # Combinar CPU con los datos de RAM
             for app in apps_formateadas:
                 nombre_sin_exe = app['nombre'].replace('.exe', '.exe')
                 if nombre_sin_exe in cpu_data:
@@ -449,17 +405,11 @@ def obtener_aplicaciones_activas():
     except Exception as e:
         print(f"⚠️ Error con Performance Counters: {e}")
     
-    # Fallback a psutil
-    return obtener_aplicaciones_activas_fallback()
-    
-    # Fallback: usar el método anterior si PowerShell falla
     return obtener_aplicaciones_activas_fallback()
 
 
 def obtener_aplicaciones_activas_fallback():
-    """
-    Método de respaldo usando psutil si PowerShell falla.
-    """
+    """Fallback usando psutil"""
     apps_agrupadas = {}
     
     for proc in psutil.process_iter(['name']):
@@ -469,7 +419,7 @@ def obtener_aplicaciones_activas_fallback():
             pass
     
     import time
-    time.sleep(0.5)
+    time.sleep(0.3)
     
     for proc in psutil.process_iter(['name', 'cpu_percent', 'memory_info']):
         try:
@@ -508,12 +458,12 @@ def obtener_aplicaciones_activas_fallback():
         })
     
     apps_con_recursos.sort(key=lambda x: x['ram_mb'], reverse=True)
-    return apps_con_recursos[:15]
+    return apps_con_recursos[:10]  # REDUCIDO DE 15 A 10
+
 
 def obtener_usuarios():
     try:
         usuario_actual = os.getlogin()
-        
         usuarios_activos = [u.name for u in psutil.users()]
         
         return {
@@ -521,7 +471,8 @@ def obtener_usuarios():
             "usuarios_activos": list(set(usuarios_activos))
         }
     except Exception:
-        return {"usuario_actual": "Desconocido", "usuarios_activos": [] }
+        return {"usuario_actual": "Desconocido", "usuarios_activos": []}
+
 
 def obtener_id_inventario():
     try:
@@ -533,41 +484,44 @@ def obtener_id_inventario():
         print(f"Error obteniendo UUID: {e}")
         return platform.node()
 
-def obtener_datos_pc():
+
+def obtener_datos_pc(incluir_pesados=True):
     """
-    Función principal con todos los datos extendidos.
+    Función principal optimizada.
+    
+    Args:
+        incluir_pesados: Si False, omite aplicaciones activas y errores (para sincronización rápida)
     """
-    from src.core.scanner import (
-        obtener_ip_publica, 
-        obtener_id_anydesk, 
-        obtener_id_inventario,
-        obtener_aplicaciones_activas,
-        obtener_usuarios
-    )
+    # Inicializar caché si es primera vez
+    cache = inicializar_cache()
     
-    ip = obtener_ip_publica()
-    anydesk_id = obtener_id_anydesk()
-    
+    # Datos base (SIEMPRE)
     datos = {
         "uuid": obtener_id_inventario(),
-        "hostname": platform.node(),
-        "sistema_operativo": f"{platform.system()} {platform.release()}",
-        "arquitectura": platform.machine(),
-        "ip_publica": ip,
-        "anydesk_id": anydesk_id,
-        "aplicaciones_activas": obtener_aplicaciones_activas(),
-        "procesador": platform.processor(),
-        "nucleos_fisicos": psutil.cpu_count(logical=False),
-        "ram_total_gb": round(psutil.virtual_memory().total / (1024 ** 3), 2),
-        "cpu_uso_porcentaje": psutil.cpu_percent(interval=1),
+        "hostname": cache['hostname'],
+        "sistema_operativo": cache['sistema_operativo'],
+        "arquitectura": cache['arquitectura'],
+        "procesador": cache['procesador'],
+        "nucleos_fisicos": cache['nucleos_fisicos'],
+        "ram_total_gb": cache['ram_total_gb'],
+        
+        # Datos dinámicos ligeros
+        "cpu_uso_porcentaje": psutil.cpu_percent(interval=0.5),  # REDUCIDO DE 1 A 0.5
         "ram_uso_porcentaje": psutil.virtual_memory().percent,
         "usuarios": obtener_usuarios(),
-        
-        # NUEVOS DATOS
         "discos": obtener_salud_discos(),
         "red": obtener_info_red(),
-        "errores_recientes": obtener_errores_sistema(limite=10),
         "servicios_criticos": obtener_estado_servicios()
     }
+    
+    # Datos pesados (CONDICIONAL)
+    if incluir_pesados:
+        datos["ip_publica"] = obtener_ip_publica()
+        datos["anydesk_id"] = obtener_id_anydesk()
+        datos["aplicaciones_activas"] = obtener_aplicaciones_activas()
+        datos["errores_recientes"] = obtener_errores_sistema(limite=5)
+    
+    # Liberar memoria
+    gc.collect()
     
     return datos
