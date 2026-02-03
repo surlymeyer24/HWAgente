@@ -4,6 +4,7 @@ import subprocess
 import os
 
 # --- 1. PREVENCIÓN DE ERRORES EN MODO INVISIBLE ---
+# Se define antes que nada para evitar crasheos por falta de consola 
 from config.config import DEBUG_MODE
 if getattr(sys, 'frozen', False) and not DEBUG_MODE:
     sys.stdin = None
@@ -75,42 +76,33 @@ if RUNNING_AS_SERVICE:
             win32serviceutil.ServiceFramework.__init__(self, args)
             self.hWaitStop = win32event.CreateEvent(None, 0, 0, None)
             self.running = True
-            self.contador_ciclos = 0  # Para controlar frecuencias
 
         def SvcStop(self):
             self.running = False
             win32event.SetEvent(self.hWaitStop)
 
         def SvcDoRun(self):
+            # NOTIFICAR INICIO A WINDOWS INMEDIATAMENTE PARA EVITAR ERROR 1053
             self.ReportServiceStatus(win32service.SERVICE_START_PENDING)
             
             try:
+                # Importaciones tardías para no demorar el arranque 
                 from src.database.firebase_client import enviar_datos_pc, escuchar_comandos_remotos, log_debug
                 from src.core.scanner import obtener_datos_pc
                 
+                # AVISAR QUE YA ESTÁ CORRIENDO
                 self.ReportServiceStatus(win32service.SERVICE_RUNNING)
-                log_debug("Servicio en estado RUNNING (optimizado).")
+                log_debug("Servicio en estado RUNNING.")
                 
-                # PRIMERA SINCRONIZACIÓN COMPLETA
-                datos = obtener_datos_pc(incluir_pesados=True)
-                enviar_datos_pc(datos, forzar_completo=True)
+                datos = obtener_datos_pc()
+                enviar_datos_pc(datos)
                 escuchar_comandos_remotos(datos['uuid'])
                 
-                # LOOP OPTIMIZADO
                 while self.running:
-                    rc = win32event.WaitForSingleObject(self.hWaitStop, 300000)  # 5 min
+                    rc = win32event.WaitForSingleObject(self.hWaitStop, 300000)
                     if rc == win32event.WAIT_OBJECT_0:
                         break
-                    
-                    self.contador_ciclos += 1
-                    
-                    # Determinar si incluir datos pesados
-                    # Cada 3 ciclos (15 min) incluye aplicaciones
-                    # Cada 6 ciclos (30 min) incluye errores
-                    incluir_pesados = (self.contador_ciclos % 3 == 0)
-                    
-                    datos = obtener_datos_pc(incluir_pesados=incluir_pesados)
-                    enviar_datos_pc(datos)
+                    enviar_datos_pc(obtener_datos_pc())
                     
             except Exception as e:
                 from src.database.firebase_client import log_debug
@@ -118,13 +110,14 @@ if RUNNING_AS_SERVICE:
 
 # --- 5. PUNTO DE ENTRADA PRINCIPAL ---
 if __name__ == "__main__":
-    # Caso A: Comandos de instalación manual
+    # Caso A: Comandos de instalación manual (sc install, remove, etc)
     if len(sys.argv) > 1 and sys.argv[1].lower() in ['install', 'update', 'remove', 'start', 'stop']:
         if RUNNING_AS_SERVICE:
             win32serviceutil.HandleCommandLine(AgenteMonitoreoService)
         sys.exit(0)
 
     # Caso B: Ejecución como servicio de Windows (SCM)
+    # Solo entra aquí si Windows SCM lo llama
     if RUNNING_AS_SERVICE and len(sys.argv) == 1:
         try:
             servicemanager.Initialize()
@@ -132,7 +125,7 @@ if __name__ == "__main__":
             servicemanager.StartServiceCtrlDispatcher()
             sys.exit(0)
         except:
-            pass
+            pass  # Si falla, continúa al Caso C
 
     # Caso C: Usuario ejecuta el .exe con doble clic
     if not servicio_esta_instalado():
@@ -140,9 +133,10 @@ if __name__ == "__main__":
             solicitar_permisos_admin()
         else:
             if instalar_servicio_automaticamente():
-                print("Servicio instalado y corriendo (optimizado).")
+                print("Servicio instalado y corriendo.")
                 time.sleep(3)
     else:
+        # Asegurarse de que el servicio esté iniciado
         subprocess.run('sc start "AgenteMonitoreo"', shell=True, 
                       creationflags=subprocess.CREATE_NO_WINDOW)
         sys.exit(0)
