@@ -42,7 +42,8 @@ _contadores = {
     'sincronizaciones_totales': 0,
     'ultima_sync_completa': 0,
     'ultima_sync_apps': 0,
-    'ultima_sync_errores': 0
+    'ultima_sync_errores': 0,
+    'ultima_sync_perifericos': 0
 }
 
 def enviar_datos_pc(datos, forzar_completo=False):
@@ -95,7 +96,11 @@ def enviar_datos_pc(datos, forzar_completo=False):
                 actualizacion["errores_recientes"] = datos["errores_recientes"]
                 _contadores['ultima_sync_errores'] = tiempo_actual
                 log_debug("Actualizando errores del sistema")
-        
+            if "perifericos" in datos:
+                actualizacion["perifericos"] = datos["perifericos"]
+                _contadores['ultima_sync_perifericos'] = tiempo_actual
+                log_debug("Actualizando periféricos")
+                
         db.collection(FIREBASE_COLLECTION_NAME).document(document_id).update(actualizacion)
         log_debug(f"Sincronización incremental: {document_id}")
         

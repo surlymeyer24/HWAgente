@@ -1,11 +1,14 @@
 @echo off
-echo 🧹 Limpiando archivos residuales...
-rmdir /s /q build
-rmdir /s /q dist
-del /f /q *.spec
+echo Limpiando build anterior...
+rmdir /s /q build 2>nul
+rmdir /s /q dist 2>nul
 
-echo 🏗️  Compilando el nuevo Agente...
-pyinstaller --onefile --noconsole --uac-admin --add-data "auth;auth" --add-data "config;config" --hidden-import=win32timezone --name "AgenteBacar" main.py
+echo Compilando AgenteBacar...
+pyinstaller AgenteBacar.spec --clean
 
-echo ✅ Proceso terminado. El EXE esta en la carpeta dist.
+if exist dist\AgenteBacar.exe (
+    echo Listo! EXE generado en dist\AgenteBacar.exe
+) else (
+    echo ERROR: No se genero el EXE. Revisa los errores arriba.
+)
 pause

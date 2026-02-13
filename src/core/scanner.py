@@ -8,6 +8,12 @@ import win32evtlogutil
 import win32con
 import gc
 
+try:
+    from src.core.perifericos import obtener_todos_los_perifericos
+    PERIFERICOS_DISPONIBLE = True
+except ImportError:
+    PERIFERICOS_DISPONIBLE = False
+
 # ==================== CACHÉ GLOBAL ====================
 _CACHE_ESTATICO = {}
 
@@ -520,7 +526,10 @@ def obtener_datos_pc(incluir_pesados=True):
         datos["anydesk_id"] = obtener_id_anydesk()
         datos["aplicaciones_activas"] = obtener_aplicaciones_activas()
         datos["errores_recientes"] = obtener_errores_sistema(limite=5)
-    
+
+        if PERIFERICOS_DISPONIBLE:
+            datos["perifericos"] = obtener_todos_los_perifericos()
+
     # Liberar memoria
     gc.collect()
     

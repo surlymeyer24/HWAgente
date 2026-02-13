@@ -6,7 +6,12 @@ a = Analysis(
     pathex=[],
     binaries=[],
     datas=[('auth', 'auth'), ('config', 'config')],
-    hiddenimports=['win32timezone'],
+    hiddenimports=[
+        'win32timezone',
+        'src.core.perifericos',
+        'src.core.scanner',
+        'src.database.firebase_client',
+    ],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
