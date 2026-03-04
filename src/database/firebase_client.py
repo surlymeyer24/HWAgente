@@ -96,6 +96,7 @@ def enviar_datos_pc(datos, forzar_completo=False):
         if _contadores['sincronizaciones_totales'] == 1 or forzar_completo:
             datos["ultima_sincronizacion"] = firestore.SERVER_TIMESTAMP
             datos["version_agente"] = VERSION_AGENTE or "?"
+            datos["estado_conexion"] = "ONLINE"
             db.collection(FIREBASE_COLLECTION_NAME).document(document_id).set(datos)
             _contadores['ultima_sync_completa'] = tiempo_actual
             _contadores['ultima_sync_apps'] = tiempo_actual
@@ -112,6 +113,7 @@ def enviar_datos_pc(datos, forzar_completo=False):
             "servicios_criticos": datos.get("servicios_criticos"),
             "ultima_sincronizacion": firestore.SERVER_TIMESTAMP,
             "version_agente": VERSION_AGENTE or "?",
+            "estado_conexion": "ONLINE",
         }
         
         # Aplicaciones cada 15 min (900 seg)
