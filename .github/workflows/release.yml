@@ -1,0 +1,53 @@
+name: Build and Release AgenteBacar
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+jobs:
+  build-and-release:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install firebase-admin pywin32 psutil requests wmi pyinstaller
+
+      - name: Build AgenteBacar.exe
+        run: pyinstaller AgenteBacar.spec --clean
+
+      - name: Upload to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/AgenteBacar.exe
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Update Firestore config/agente.url
+        shell: bash
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: |
+          python - <<'PYEOF'
+          import os, json, firebase_admin
+          from firebase_admin import credentials, firestore
+
+          sa = json.loads(os.environ["FIREBASE_SERVICE_ACCOUNT"])
+          cred = credentials.Certificate(sa)
+          firebase_admin.initialize_app(cred)
+          db = firestore.client()
+
+          tag = os.environ.get("GITHUB_REF_NAME", "")
+          url = "https://github.com/surlymeyer24/HWAgente/releases/download/" + tag + "/AgenteBacar.exe"
+          db.collection("config").document("agente").set({"url": url}, merge=True)
+          print("Firestore actualizado: " + url)
+          PYEOF

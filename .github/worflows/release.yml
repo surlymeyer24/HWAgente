@@ -1,0 +1,5 @@
+# ATENCION: esta carpeta tiene un typo ('worflows' en lugar de 'workflows').
+# GitHub Actions NO va a detectar este archivo.
+# El workflow real esta en: .github/workflows/release.yml
+#
+# Ver: .github/workflows/release.yml

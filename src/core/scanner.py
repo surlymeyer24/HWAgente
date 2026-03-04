@@ -2,7 +2,12 @@ import psutil
 import platform
 import subprocess
 import os
+import sys
 import requests
+import win32evtlog
+import win32evtlogutil
+import win32con
+import gc
 import win32evtlog
 import win32evtlogutil
 import win32con
@@ -14,15 +19,47 @@ try:
 except ImportError:
     PERIFERICOS_DISPONIBLE = False
 
+try:
+    from src.core.windows_updates import obtener_resumen_updates
+    WINDOWS_UPDATES_DISPONIBLE = True
+except ImportError:
+    WINDOWS_UPDATES_DISPONIBLE = False
+
+try:
+    from src.core.software_critico import obtener_software_critico
+    SOFTWARE_CRITICO_DISPONIBLE = True
+except ImportError:
+    SOFTWARE_CRITICO_DISPONIBLE = False
+
 # ==================== CACHÉ GLOBAL ====================
 _CACHE_ESTATICO = {}
+
+def obtener_hostname():
+    """Nombre de la PC. Fiable cuando el .exe corre como servicio en otra máquina."""
+    name = platform.node()
+    if name and len(name.strip()) > 0:
+        return name.strip()
+    if sys.platform == "win32":
+        name = os.environ.get("COMPUTERNAME") or os.environ.get("HOSTNAME")
+        if name and len(name.strip()) > 0:
+            return name.strip()
+        try:
+            import ctypes
+            buf = ctypes.create_unicode_buffer(256)
+            n = ctypes.c_ulong(256)
+            if ctypes.windll.kernel32.GetComputerNameW(ctypes.byref(buf), ctypes.byref(n)):
+                return buf.value
+        except Exception:
+            pass
+    return (name and name.strip()) or "PC-Desconocida"
+
 
 def inicializar_cache():
     """Cachea datos que nunca cambian (se llama 1 vez al inicio)"""
     global _CACHE_ESTATICO
     if not _CACHE_ESTATICO:
         _CACHE_ESTATICO = {
-            'hostname': platform.node(),
+            'hostname': obtener_hostname(),
             'sistema_operativo': f"{platform.system()} {platform.release()}",
             'arquitectura': platform.machine(),
             'procesador': platform.processor(),
@@ -481,14 +518,22 @@ def obtener_usuarios():
 
 
 def obtener_id_inventario():
-    try:
-        cmd = 'wmic csproduct get uuid'
-        resultado = subprocess.check_output(cmd, shell=True).decode().split('\n')
-        uuid = resultado[1].strip()
-        return uuid
-    except Exception as e:
-        print(f"Error obteniendo UUID: {e}")
-        return platform.node()
+    """Identificador único de la máquina: MachineGuid del registro de Windows."""
+    if sys.platform == "win32":
+        try:
+            import winreg
+            key = winreg.OpenKey(
+                winreg.HKEY_LOCAL_MACHINE,
+                r"SOFTWARE\Microsoft\Cryptography",
+                0,
+                winreg.KEY_READ
+            )
+            guid, _ = winreg.QueryValueEx(key, "MachineGuid")
+            winreg.CloseKey(key)
+            return guid.strip()
+        except Exception as e:
+            print(f"Error obteniendo MachineGuid: {e}")
+    return platform.node()
 
 
 def obtener_datos_pc(incluir_pesados=True):
@@ -529,6 +574,12 @@ def obtener_datos_pc(incluir_pesados=True):
 
         if PERIFERICOS_DISPONIBLE:
             datos["perifericos"] = obtener_todos_los_perifericos()
+
+        if WINDOWS_UPDATES_DISPONIBLE:
+            datos["windows_updates"] = obtener_resumen_updates()
+
+        if SOFTWARE_CRITICO_DISPONIBLE:
+            datos["software_critico"] = obtener_software_critico()
 
     # Liberar memoria
     gc.collect()

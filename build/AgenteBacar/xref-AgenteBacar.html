@@ -174,8 +174,11 @@ imports:
  &#8226;   <a href="#re._parser">re._parser</a>
  &#8226;   <a href="#reprlib">reprlib</a>
  &#8226;   <a href="#servicemanager">servicemanager</a>
+ &#8226;   <a href="#src.core.auto_update">src.core.auto_update</a>
  &#8226;   <a href="#src.core.perifericos">src.core.perifericos</a>
  &#8226;   <a href="#src.core.scanner">src.core.scanner</a>
+ &#8226;   <a href="#src.core.software_critico">src.core.software_critico</a>
+ &#8226;   <a href="#src.core.windows_updates">src.core.windows_updates</a>
  &#8226;   <a href="#src.database.firebase_client">src.database.firebase_client</a>
  &#8226;   <a href="#sre_compile">sre_compile</a>
  &#8226;   <a href="#sre_constants">sre_constants</a>
@@ -8920,6 +8923,7 @@ imported by:
  &#8226;   <a href="#requests.sessions">requests.sessions</a>
  &#8226;   <a href="#setuptools._vendor.tomli._re">setuptools._vendor.tomli._re</a>
  &#8226;   <a href="#setuptools.warnings">setuptools.warnings</a>
+ &#8226;   <a href="#src.database.firebase_client">src.database.firebase_client</a>
  &#8226;   <a href="#tomllib._re">tomllib._re</a>
  &#8226;   <a href="#urllib3.connection">urllib3.connection</a>
  &#8226;   <a href="#win32timezone">win32timezone</a>
@@ -24336,6 +24340,8 @@ imported by:
  &#8226;   <a href="#setuptools.msvc">setuptools.msvc</a>
  &#8226;   <a href="#src.core.perifericos">src.core.perifericos</a>
  &#8226;   <a href="#src.core.scanner">src.core.scanner</a>
+ &#8226;   <a href="#src.core.software_critico">src.core.software_critico</a>
+ &#8226;   <a href="#src.core.windows_updates">src.core.windows_updates</a>
  &#8226;   <a href="#urllib3._request_methods">urllib3._request_methods</a>
  &#8226;   <a href="#urllib3.contrib.emscripten.fetch">urllib3.contrib.emscripten.fetch</a>
  &#8226;   <a href="#urllib3.contrib.emscripten.response">urllib3.contrib.emscripten.response</a>
@@ -25932,6 +25938,7 @@ imported by:
  &#8226;   <a href="#site">site</a>
  &#8226;   <a href="#socket">socket</a>
  &#8226;   <a href="#socketserver">socketserver</a>
+ &#8226;   <a href="#src.core.auto_update">src.core.auto_update</a>
  &#8226;   <a href="#src.core.scanner">src.core.scanner</a>
  &#8226;   <a href="#src.database.firebase_client">src.database.firebase_client</a>
  &#8226;   <a href="#ssl">ssl</a>
@@ -26727,6 +26734,8 @@ imported by:
  &#8226;   <a href="#pickle">pickle</a>
  &#8226;   <a href="#setuptools._distutils.dist">setuptools._distutils.dist</a>
  &#8226;   <a href="#src.core.perifericos">src.core.perifericos</a>
+ &#8226;   <a href="#src.core.software_critico">src.core.software_critico</a>
+ &#8226;   <a href="#src.core.windows_updates">src.core.windows_updates</a>
  &#8226;   <a href="#unittest.case">unittest.case</a>
  &#8226;   <a href="#unittest.mock">unittest.mock</a>
 
@@ -29225,6 +29234,7 @@ imported by:
  &#8226;   <a href="#requests.status_codes">requests.status_codes</a>
  &#8226;   <a href="#requests.structures">requests.structures</a>
  &#8226;   <a href="#requests.utils">requests.utils</a>
+ &#8226;   <a href="#src.core.auto_update">src.core.auto_update</a>
  &#8226;   <a href="#src.core.scanner">src.core.scanner</a>
 
   </div>
@@ -34141,8 +34151,32 @@ imports:
   </div>
   <div class="import">
 imported by:
-    <a href="#src.core.perifericos">src.core.perifericos</a>
+    <a href="#src.core.auto_update">src.core.auto_update</a>
+ &#8226;   <a href="#src.core.perifericos">src.core.perifericos</a>
  &#8226;   <a href="#src.core.scanner">src.core.scanner</a>
+ &#8226;   <a href="#src.core.software_critico">src.core.software_critico</a>
+ &#8226;   <a href="#src.core.windows_updates">src.core.windows_updates</a>
+
+  </div>
+
+</div>
+
+<div class="node">
+  <a name="src.core.auto_update"></a>
+  <a target="code" href="///C:/Users/Usr/Documents/MiniAgente/src/core/auto_update.py" type="text/plain"><tt>src.core.auto_update</tt></a>
+<span class="moduletype">SourceModule</span>  <div class="import">
+imports:
+    <a href="#os">os</a>
+ &#8226;   <a href="#requests">requests</a>
+ &#8226;   <a href="#src.core">src.core</a>
+ &#8226;   <a href="#subprocess">subprocess</a>
+ &#8226;   <a href="#sys">sys</a>
+ &#8226;   <a href="#tempfile">tempfile</a>
+
+  </div>
+  <div class="import">
+imported by:
+    <a href="#main.py">main.py</a>
 
   </div>
 
@@ -34182,16 +34216,63 @@ imports:
  &#8226;   <a href="#requests">requests</a>
  &#8226;   <a href="#src.core">src.core</a>
  &#8226;   <a href="#src.core.perifericos">src.core.perifericos</a>
+ &#8226;   <a href="#src.core.software_critico">src.core.software_critico</a>
+ &#8226;   <a href="#src.core.windows_updates">src.core.windows_updates</a>
  &#8226;   <a href="#subprocess">subprocess</a>
+ &#8226;   <a href="#sys">sys</a>
  &#8226;   <a href="#time">time</a>
  &#8226;   <a href="#win32con">win32con</a>
  &#8226;   <a href="#win32evtlog">win32evtlog</a>
  &#8226;   <a href="#win32evtlogutil">win32evtlogutil</a>
+ &#8226;   <a href="#winreg">winreg</a>
 
   </div>
   <div class="import">
 imported by:
     <a href="#main.py">main.py</a>
+ &#8226;   <a href="#src.database.firebase_client">src.database.firebase_client</a>
+
+  </div>
+
+</div>
+
+<div class="node">
+  <a name="src.core.software_critico"></a>
+  <a target="code" href="///C:/Users/Usr/Documents/MiniAgente/src/core/software_critico.py" type="text/plain"><tt>src.core.software_critico</tt></a>
+<span class="moduletype">SourceModule</span>  <div class="import">
+imports:
+    <a href="#json">json</a>
+ &#8226;   <a href="#pprint">pprint</a>
+ &#8226;   <a href="#src.core">src.core</a>
+ &#8226;   <a href="#subprocess">subprocess</a>
+ &#8226;   <a href="#time">time</a>
+
+  </div>
+  <div class="import">
+imported by:
+    <a href="#main.py">main.py</a>
+ &#8226;   <a href="#src.core.scanner">src.core.scanner</a>
+
+  </div>
+
+</div>
+
+<div class="node">
+  <a name="src.core.windows_updates"></a>
+  <a target="code" href="///C:/Users/Usr/Documents/MiniAgente/src/core/windows_updates.py" type="text/plain"><tt>src.core.windows_updates</tt></a>
+<span class="moduletype">SourceModule</span>  <div class="import">
+imports:
+    <a href="#json">json</a>
+ &#8226;   <a href="#pprint">pprint</a>
+ &#8226;   <a href="#src.core">src.core</a>
+ &#8226;   <a href="#subprocess">subprocess</a>
+ &#8226;   <a href="#time">time</a>
+
+  </div>
+  <div class="import">
+imported by:
+    <a href="#main.py">main.py</a>
+ &#8226;   <a href="#src.core.scanner">src.core.scanner</a>
  &#8226;   <a href="#src.database.firebase_client">src.database.firebase_client</a>
 
   </div>
@@ -34220,15 +34301,18 @@ imported by:
 <span class="moduletype">SourceModule</span>  <div class="import">
 imports:
     <a href="#config.config">config.config</a>
+ &#8226;   <a href="#datetime">datetime</a>
  &#8226;   <a href="#firebase_admin">firebase_admin</a>
  &#8226;   <a href="#firebase_admin.credentials">firebase_admin.credentials</a>
  &#8226;   <a href="#firebase_admin.firestore">firebase_admin.firestore</a>
  &#8226;   <a href="#os">os</a>
  &#8226;   <a href="#platform">platform</a>
  &#8226;   <a href="#src.core.scanner">src.core.scanner</a>
+ &#8226;   <a href="#src.core.windows_updates">src.core.windows_updates</a>
  &#8226;   <a href="#src.database">src.database</a>
  &#8226;   <a href="#sys">sys</a>
  &#8226;   <a href="#time">time</a>
+ &#8226;   <a href="#win32event">win32event</a>
 
   </div>
   <div class="import">
@@ -34581,8 +34665,11 @@ imported by:
  &#8226;   <a href="#setuptools._vendor.packaging._musllinux">setuptools._vendor.packaging._musllinux</a>
  &#8226;   <a href="#setuptools._vendor.packaging.tags">setuptools._vendor.packaging.tags</a>
  &#8226;   <a href="#setuptools.installer">setuptools.installer</a>
+ &#8226;   <a href="#src.core.auto_update">src.core.auto_update</a>
  &#8226;   <a href="#src.core.perifericos">src.core.perifericos</a>
  &#8226;   <a href="#src.core.scanner">src.core.scanner</a>
+ &#8226;   <a href="#src.core.software_critico">src.core.software_critico</a>
+ &#8226;   <a href="#src.core.windows_updates">src.core.windows_updates</a>
  &#8226;   <a href="#webbrowser">webbrowser</a>
 
   </div>
@@ -34863,6 +34950,8 @@ imported by:
  &#8226;   <a href="#site">site</a>
  &#8226;   <a href="#socket">socket</a>
  &#8226;   <a href="#socketserver">socketserver</a>
+ &#8226;   <a href="#src.core.auto_update">src.core.auto_update</a>
+ &#8226;   <a href="#src.core.scanner">src.core.scanner</a>
  &#8226;   <a href="#src.database.firebase_client">src.database.firebase_client</a>
  &#8226;   <a href="#ssl">ssl</a>
  &#8226;   <a href="#statistics">statistics</a>
@@ -35020,6 +35109,7 @@ imported by:
  &#8226;   <a href="#setuptools._distutils.util">setuptools._distutils.util</a>
  &#8226;   <a href="#setuptools._vendor.jaraco.context">setuptools._vendor.jaraco.context</a>
  &#8226;   <a href="#setuptools.installer">setuptools.installer</a>
+ &#8226;   <a href="#src.core.auto_update">src.core.auto_update</a>
  &#8226;   <a href="#urllib.request">urllib.request</a>
  &#8226;   <a href="#urllib.response">urllib.response</a>
 
@@ -35251,6 +35341,8 @@ imported by:
  &#8226;   <a href="#setuptools.command.egg_info">setuptools.command.egg_info</a>
  &#8226;   <a href="#socketserver">socketserver</a>
  &#8226;   <a href="#src.core.scanner">src.core.scanner</a>
+ &#8226;   <a href="#src.core.software_critico">src.core.software_critico</a>
+ &#8226;   <a href="#src.core.windows_updates">src.core.windows_updates</a>
  &#8226;   <a href="#src.database.firebase_client">src.database.firebase_client</a>
  &#8226;   <a href="#ssl">ssl</a>
  &#8226;   <a href="#subprocess">subprocess</a>
@@ -38067,6 +38159,7 @@ imported by:
   <tt>win32event</tt> <span class="moduletype"><tt>C:\Users\Usr\AppData\Local\Programs\Python\Python314\Lib\site-packages\win32\win32event.pyd</tt></span>  <div class="import">
 imported by:
     <a href="#main.py">main.py</a>
+ &#8226;   <a href="#src.database.firebase_client">src.database.firebase_client</a>
 
   </div>
 
@@ -38210,6 +38303,7 @@ imported by:
  &#8226;   <a href="#requests.utils">requests.utils</a>
  &#8226;   <a href="#setuptools._distutils.compilers.C.msvc">setuptools._distutils.compilers.C.msvc</a>
  &#8226;   <a href="#setuptools.msvc">setuptools.msvc</a>
+ &#8226;   <a href="#src.core.scanner">src.core.scanner</a>
  &#8226;   <a href="#urllib.request">urllib.request</a>
  &#8226;   <a href="#win32timezone">win32timezone</a>
 

@@ -96,12 +96,43 @@ if RUNNING_AS_SERVICE:
                 
                 datos = obtener_datos_pc()
                 enviar_datos_pc(datos)
-                escuchar_comandos_remotos(datos['uuid'])
-                
+                # Evento para despertar el bucle cuando Firebase envíe ACTUALIZAR_AGENTE
+                try:
+                    import win32event as wevt
+                    h_update = wevt.CreateEvent(None, 0, 0, None)
+                except Exception:
+                    h_update = None
+                escuchar_comandos_remotos(datos['uuid'], evento_actualizar=h_update)
+
                 while self.running:
-                    rc = win32event.WaitForSingleObject(self.hWaitStop, 300000)
+                    if h_update is not None:
+                        rc = win32event.WaitForMultipleObjects(
+                            [self.hWaitStop, h_update], False, 300000
+                        )
+                    else:
+                        rc = win32event.WaitForSingleObject(self.hWaitStop, 300000)
                     if rc == win32event.WAIT_OBJECT_0:
                         break
+                    if (h_update is not None and rc == win32event.WAIT_OBJECT_0 + 1
+                            and getattr(sys, 'frozen', False)):
+                        try:
+                            from src.database.firebase_client import (
+                                _url_actualizacion_pendiente,
+                                log_debug,
+                            )
+                            from src.core.auto_update import download_and_apply_update
+                            url = _url_actualizacion_pendiente()
+                            if url and download_and_apply_update(url):
+                                log_debug("Actualizacion programada; reinicio en breve.")
+                                self.running = False
+                                break
+                        except Exception as e:
+                            try:
+                                from src.database.firebase_client import log_debug
+                                log_debug(f"Error actualizando agente: {e}")
+                            except Exception:
+                                pass
+                        continue
                     enviar_datos_pc(obtener_datos_pc())
                     
             except Exception as e:

@@ -1,4 +1,10 @@
 @echo off
+cd /d "%~dp0"
+
+echo Deteniendo servicio AgenteMonitoreo (si esta instalado)...
+sc stop AgenteMonitoreo 2>nul
+timeout /t 2 /nobreak >nul
+
 echo Limpiando build anterior...
 rmdir /s /q build 2>nul
 rmdir /s /q dist 2>nul
