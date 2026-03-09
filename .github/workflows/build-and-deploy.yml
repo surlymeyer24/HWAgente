@@ -1,0 +1,64 @@
+name: Build and Deploy Agente
+
+on:
+  workflow_dispatch:   # Solo cuando vos lo ejecutás desde GitHub
+
+concurrency:
+  group: build-and-deploy
+  cancel-in-progress: true
+
+jobs:
+  build-and-deploy:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install firebase-admin google-cloud-storage pywin32 psutil requests wmi pyinstaller
+
+      - name: Create auth folder for build
+        shell: bash
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: |
+          mkdir -p auth
+          echo "$FIREBASE_SERVICE_ACCOUNT" > auth/serviceAccountKey.json
+
+      - name: Build AgenteBacar.exe
+        run: pyinstaller AgenteBacar.spec --clean
+
+      - name: Upload to Firebase Storage and update Firestore
+        shell: bash
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: |
+          python - <<'PYEOF'
+          import os, json, firebase_admin
+          from google.cloud import storage
+          from firebase_admin import credentials, firestore
+
+          sa = json.loads(os.environ["FIREBASE_SERVICE_ACCOUNT"])
+          project_id = sa["project_id"]
+          bucket_name = f"{project_id}.appspot.com"
+
+          # Subir exe a Firebase Storage
+          client = storage.Client.from_service_account_info(sa)
+          bucket = client.bucket(bucket_name)
+          blob = bucket.blob("agente/AgenteBacar.exe")
+          blob.upload_from_filename("dist/AgenteBacar.exe", content_type="application/octet-stream")
+          url = f"https://firebasestorage.googleapis.com/v0/b/{bucket_name}/o/agente%2FAgenteBacar.exe?alt=media"
+          print("Subido a Storage:", url)
+
+          # Actualizar URL en Firestore
+          cred = credentials.Certificate(sa)
+          firebase_admin.initialize_app(cred)
+          db = firestore.client()
+          db.collection("config").document("agente").set({"url": url}, merge=True)
+          print("Firestore actualizado: config/agente.url =", url)
+          PYEOF
