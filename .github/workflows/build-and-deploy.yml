@@ -34,6 +34,7 @@ jobs:
           s = os.environ.get("FIREBASE_SERVICE_ACCOUNT_B64")
           if not s:
               raise SystemExit("ERROR: Secret FIREBASE_SERVICE_ACCOUNT_B64 no configurado. Ver docs en el workflow.")
+          s = s.strip().replace("\n", "").replace("\r", "").replace(" ", "")
           raw = base64.b64decode(s).decode("utf-8")
           json.loads(raw)
           os.makedirs("auth", exist_ok=True)
@@ -47,16 +48,15 @@ jobs:
 
       - name: Upload to Firebase Storage and update Firestore
         shell: bash
-        env:
-          FIREBASE_SERVICE_ACCOUNT_B64: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_B64 }}
         run: |
           python - <<'PYEOF'
-          import os, base64, json, firebase_admin
+          import json, firebase_admin
           from google.cloud import storage
           from firebase_admin import credentials, firestore
 
-          raw = base64.b64decode(os.environ["FIREBASE_SERVICE_ACCOUNT_B64"]).decode("utf-8")
-          sa = json.loads(raw)
+          # Usar el archivo creado en el paso anterior (evita corrupción por env)
+          with open("auth/serviceAccountKey.json") as f:
+              sa = json.load(f)
           project_id = sa["project_id"]
           bucket_name = f"{project_id}.appspot.com"
 
