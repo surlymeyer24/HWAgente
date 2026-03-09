@@ -16,7 +16,7 @@ jobs:
           python-version: '3.11'
 
       - name: Install dependencies
-        run: pip install firebase-admin
+        run: pip install firebase-admin google-cloud-firestore
 
       - name: Check offline PCs
         shell: bash
