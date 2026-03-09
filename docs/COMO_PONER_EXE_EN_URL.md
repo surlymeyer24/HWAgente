@@ -1,6 +1,6 @@
 # Cómo tener una URL para descargar el AgenteBacar.exe
 
-Necesitás una URL pública (o con token) donde esté el `.exe` para que el comando **ACTUALIZAR_AGENTE** pueda descargarlo en cada PC. Tres opciones:
+Necesitás una URL pública (o con token) donde esté el `.exe` para que el comando **ACTUALIZAR_AGENTE** pueda descargarlo en cada PC. Dos opciones:
 
 ---
 
@@ -62,41 +62,7 @@ Listo: cuando ejecutes **ACTUALIZAR_AGENTE** desde la consola, el agente usará 
 
 ---
 
-## Opción 2: GitHub Releases (gratis, con versionado)
-
-Si el código está en GitHub (público o privado), podés publicar cada versión como Release y usar la URL del `.exe`.
-
-### Pasos
-
-1. **Compilá el exe**: `compilar.bat` → `dist\AgenteBacar.exe`.
-
-2. En el repo de GitHub: **Releases** → **Create a new release** (o “Draft a new release”).
-
-3. **Tag**: por ejemplo `v2.0.0` (o el número de versión que uses).
-
-4. **Title / descripción**: lo que quieras.
-
-5. En **Attach binaries**, arrastrá o subí `AgenteBacar.exe`.
-
-6. **Publish release**.
-
-7. **URL de descarga**:
-   - Clic derecho en el `.exe` en la lista de assets → “Copy link address”.
-   - O la URL típica es:
-     ```
-     https://github.com/TU_USUARIO/TU_REPO/releases/download/v2.0.0/AgenteBacar.exe
-     ```
-
-8. **Configurá la URL en Firebase**:
-   ```bash
-   python set_agente_url.py "https://github.com/TU_USUARIO/TU_REPO/releases/download/v2.0.0/AgenteBacar.exe"
-   ```
-
-Cada vez que publiques una nueva release con un nuevo `.exe`, cambiás la URL en `config/agente` (o usás siempre “latest” si configurás un redirect).
-
----
-
-## Opción 3: OneDrive o Google Drive (rápido, menos estable)
+## Opción 2: OneDrive o Google Drive (rápido, menos estable)
 
 - **OneDrive**: Subí el `.exe`, “Compartir” → “Cualquier persona con el vínculo” → copiá el enlace.  
   Para enlace **directo** a descarga, cambiá la URL así:  
@@ -120,10 +86,9 @@ python set_agente_url.py "URL_DIRECTA_QUE_OBTUVISTE"
 | Opción              | Ventaja                          | Desventaja              |
 |---------------------|----------------------------------|--------------------------|
 | **Firebase Storage**| Mismo proyecto, control total    | Hay que subir a mano o con script |
-| **GitHub Releases** | Gratis, versionado, URL estable  | Necesitás repo en GitHub |
 | **Drive / OneDrive**| Muy rápido                       | URLs a veces inestables o con límites |
 
-Recomendación: **Firebase Storage** (opción 1) o **GitHub Releases** (opción 2). Después de tener la URL, ejecutá siempre:
+Recomendación: **Firebase Storage** (opción 1). Después de tener la URL, ejecutá siempre:
 
 ```bash
 python set_agente_url.py "TU_URL_AQUI"

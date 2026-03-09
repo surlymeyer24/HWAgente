@@ -518,22 +518,32 @@ def obtener_usuarios():
 
 
 def obtener_id_inventario():
-    """Identificador único de la máquina: MachineGuid del registro de Windows."""
-    if sys.platform == "win32":
-        try:
-            import winreg
-            key = winreg.OpenKey(
-                winreg.HKEY_LOCAL_MACHINE,
-                r"SOFTWARE\Microsoft\Cryptography",
-                0,
-                winreg.KEY_READ
-            )
-            guid, _ = winreg.QueryValueEx(key, "MachineGuid")
-            winreg.CloseKey(key)
-            return guid.strip()
-        except Exception as e:
-            print(f"Error obteniendo MachineGuid: {e}")
-    return platform.node()
+    """
+    UUID persistido localmente en ProgramData.
+    Se genera una sola vez por máquina y se reutiliza siempre.
+    Evita colisiones por MachineGuid duplicado (OEM, clones, etc.).
+    """
+    import uuid as _uuid
+    uuid_dir = os.path.join(os.environ.get("ProgramData", r"C:\ProgramData"), "AgenteMonitoreo")
+    uuid_path = os.path.join(uuid_dir, "agent_uuid.txt")
+    # Leer UUID existente
+    try:
+        if os.path.exists(uuid_path):
+            with open(uuid_path, "r", encoding="utf-8") as f:
+                saved = f.read().strip()
+                if saved:
+                    return saved
+    except Exception:
+        pass
+    # Generar nuevo UUID y persistir
+    nuevo = str(_uuid.uuid4())
+    try:
+        os.makedirs(uuid_dir, exist_ok=True)
+        with open(uuid_path, "w", encoding="utf-8") as f:
+            f.write(nuevo)
+    except Exception as e:
+        print(f"Error guardando UUID local: {e}")
+    return nuevo
 
 
 def obtener_datos_pc(incluir_pesados=True):

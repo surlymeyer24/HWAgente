@@ -4,8 +4,6 @@ Configura la URL de actualización del agente en Firebase (documento config/agen
 
 Uso:
   python set_agente_url.py "https://tu-servidor.com/AgenteBacar.exe"
-  python set_agente_url.py --github usuario/repo v2.0.0
-  python set_agente_url.py -g usuario/repo v2.0.0
 
 Requisito: auth/serviceAccountKey.json en la raíz del proyecto.
 """
@@ -21,22 +19,9 @@ def main():
     if len(sys.argv) < 2:
         print("Uso:")
         print('  python set_agente_url.py "https://.../AgenteBacar.exe"')
-        print("  python set_agente_url.py --github usuario/repo v2.0.0")
         return 1
 
-    url = None
-    if sys.argv[1].strip() in ("--github", "-g"):
-        if len(sys.argv) < 4:
-            print("Con --github hace falta: usuario/repo y el tag (ej. v2.0.0)")
-            print("  python set_agente_url.py --github usuario/repo v2.0.0")
-            return 1
-        repo = sys.argv[2].strip()
-        tag = sys.argv[3].strip()
-        url = f"https://github.com/{repo}/releases/download/{tag}/AgenteBacar.exe"
-        print("URL generada:", url)
-    else:
-        url = sys.argv[1].strip()
-
+    url = sys.argv[1].strip()
     if not url:
         print("Error: la URL no puede estar vacía.")
         return 1
