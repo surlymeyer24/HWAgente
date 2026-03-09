@@ -1,3 +1,5 @@
+# Secret FIREBASE_SERVICE_ACCOUNT_B64 = base64 del JSON
+# Crear: python -c "import base64; print(base64.b64encode(open('auth/serviceAccountKey.json','rb').read()).decode())"
 name: Build and Deploy Agente
 
 on:
@@ -25,17 +27,18 @@ jobs:
       - name: Create auth folder for build
         shell: bash
         env:
-          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          FIREBASE_SERVICE_ACCOUNT_B64: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_B64 }}
         run: |
           python -c '
-          import os, json
-          s = os.environ.get("FIREBASE_SERVICE_ACCOUNT")
+          import os, base64, json
+          s = os.environ.get("FIREBASE_SERVICE_ACCOUNT_B64")
           if not s:
-              raise SystemExit("ERROR: Secret FIREBASE_SERVICE_ACCOUNT no configurado. Settings > Secrets > Actions")
+              raise SystemExit("ERROR: Secret FIREBASE_SERVICE_ACCOUNT_B64 no configurado. Ver docs en el workflow.")
+          raw = base64.b64decode(s).decode("utf-8")
+          json.loads(raw)
           os.makedirs("auth", exist_ok=True)
-          json.loads(s)
           with open("auth/serviceAccountKey.json", "w") as f:
-              f.write(s)
+              f.write(raw)
           print("auth/serviceAccountKey.json creado OK")
           '
 
@@ -45,14 +48,15 @@ jobs:
       - name: Upload to Firebase Storage and update Firestore
         shell: bash
         env:
-          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          FIREBASE_SERVICE_ACCOUNT_B64: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_B64 }}
         run: |
           python - <<'PYEOF'
-          import os, json, firebase_admin
+          import os, base64, json, firebase_admin
           from google.cloud import storage
           from firebase_admin import credentials, firestore
 
-          sa = json.loads(os.environ["FIREBASE_SERVICE_ACCOUNT"])
+          raw = base64.b64decode(os.environ["FIREBASE_SERVICE_ACCOUNT_B64"]).decode("utf-8")
+          sa = json.loads(raw)
           project_id = sa["project_id"]
           bucket_name = f"{project_id}.appspot.com"
 
