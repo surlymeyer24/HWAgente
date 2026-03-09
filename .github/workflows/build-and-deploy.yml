@@ -27,8 +27,17 @@ jobs:
         env:
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
         run: |
-          mkdir -p auth
-          echo "$FIREBASE_SERVICE_ACCOUNT" > auth/serviceAccountKey.json
+          python -c '
+          import os, json
+          s = os.environ.get("FIREBASE_SERVICE_ACCOUNT")
+          if not s:
+              raise SystemExit("ERROR: Secret FIREBASE_SERVICE_ACCOUNT no configurado. Settings > Secrets > Actions")
+          os.makedirs("auth", exist_ok=True)
+          json.loads(s)
+          with open("auth/serviceAccountKey.json", "w") as f:
+              f.write(s)
+          print("auth/serviceAccountKey.json creado OK")
+          '
 
       - name: Build AgenteBacar.exe
         run: pyinstaller AgenteBacar.spec --clean
