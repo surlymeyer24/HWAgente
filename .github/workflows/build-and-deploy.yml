@@ -1,9 +1,14 @@
-# Secret FIREBASE_SERVICE_ACCOUNT_B64 = base64 del JSON
+# Secret FIREBASE_SERVICE_ACCOUNT_B64 = base64 del serviceAccountKey.json (para actualizar Firestore)
 # Crear: python -c "import base64; print(base64.b64encode(open('auth/serviceAccountKey.json','rb').read()).decode())"
 name: Build and Deploy Agente
 
 on:
-  workflow_dispatch:   # Solo cuando vos lo ejecutás desde GitHub
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Versión (ej. v2.1.0)'
+        required: true
+        default: 'v1.0.0'
 
 concurrency:
   group: build-and-deploy
@@ -22,7 +27,7 @@ jobs:
           python-version: '3.11'
 
       - name: Install dependencies
-        run: pip install firebase-admin google-cloud-storage pywin32 psutil requests wmi pyinstaller
+        run: pip install firebase-admin pywin32 psutil requests wmi pyinstaller
 
       - name: Create auth folder for build
         shell: bash
@@ -46,32 +51,40 @@ jobs:
       - name: Build AgenteBacar.exe
         run: pyinstaller AgenteBacar.spec --clean
 
-      - name: Upload to Firebase Storage and update Firestore
+      - name: Upload to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.version }}
+          files: dist/AgenteBacar.exe
+          generate_release_notes: true
+          replace_existing: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Update Firestore config/agente.url
         shell: bash
+        env:
+          FIREBASE_SERVICE_ACCOUNT_B64: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_B64 }}
+          VERSION: ${{ github.event.inputs.version }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
         run: |
           python - <<'PYEOF'
-          import json, firebase_admin
-          from google.cloud import storage
+          import os, base64, json, firebase_admin
           from firebase_admin import credentials, firestore
 
-          # Usar el archivo creado en el paso anterior (evita corrupción por env)
-          with open("auth/serviceAccountKey.json") as f:
-              sa = json.load(f)
-          project_id = sa["project_id"]
-          bucket_name = f"{project_id}.appspot.com"
+          s = os.environ.get("FIREBASE_SERVICE_ACCOUNT_B64")
+          if not s:
+              raise SystemExit("ERROR: Secret FIREBASE_SERVICE_ACCOUNT_B64 no configurado.")
+          s = s.strip().replace("\n", "").replace("\r", "").replace(" ", "")
+          sa = json.loads(base64.b64decode(s).decode("utf-8"))
 
-          # Subir exe a Firebase Storage
-          client = storage.Client.from_service_account_info(sa)
-          bucket = client.bucket(bucket_name)
-          blob = bucket.blob("agente/AgenteBacar.exe")
-          blob.upload_from_filename("dist/AgenteBacar.exe", content_type="application/octet-stream")
-          url = f"https://firebasestorage.googleapis.com/v0/b/{bucket_name}/o/agente%2FAgenteBacar.exe?alt=media"
-          print("Subido a Storage:", url)
+          version = os.environ.get("VERSION", "v1.0.0")
+          repo = os.environ.get("GITHUB_REPOSITORY", "")
+          url = f"https://github.com/{repo}/releases/download/{version}/AgenteBacar.exe"
 
-          # Actualizar URL en Firestore
           cred = credentials.Certificate(sa)
           firebase_admin.initialize_app(cred)
           db = firestore.client()
           db.collection("config").document("agente").set({"url": url}, merge=True)
-          print("Firestore actualizado: config/agente.url =", url)
+          print("Firestore actualizado:", url)
           PYEOF
