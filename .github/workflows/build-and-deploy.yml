@@ -64,19 +64,15 @@ jobs:
       - name: Update Firestore config/agente.url
         shell: bash
         env:
-          FIREBASE_SERVICE_ACCOUNT_B64: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_B64 }}
           VERSION: ${{ github.event.inputs.version }}
           GITHUB_REPOSITORY: ${{ github.repository }}
         run: |
           python - <<'PYEOF'
-          import os, base64, json, firebase_admin
+          import os, json, firebase_admin
           from firebase_admin import credentials, firestore
 
-          s = os.environ.get("FIREBASE_SERVICE_ACCOUNT_B64")
-          if not s:
-              raise SystemExit("ERROR: Secret FIREBASE_SERVICE_ACCOUNT_B64 no configurado.")
-          s = s.strip().replace("\n", "").replace("\r", "").replace(" ", "")
-          sa = json.loads(base64.b64decode(s).decode("utf-8"))
+          with open("auth/serviceAccountKey.json") as f:
+              sa = json.load(f)
 
           version = os.environ.get("VERSION", "v1.0.0")
           repo = os.environ.get("GITHUB_REPOSITORY", "")
