@@ -33,10 +33,13 @@ def download_and_apply_update(url):
         import requests
         r = requests.get(url, timeout=120, stream=True)
         r.raise_for_status()
-        with open(nuevo_exe, "wb") as f:
-            for chunk in r.iter_content(chunk_size=65536):
-                if chunk:
-                    f.write(chunk)
+        try:
+            with open(nuevo_exe, "wb") as f:
+                for chunk in r.iter_content(chunk_size=65536):
+                    if chunk:
+                        f.write(chunk)
+        finally:
+            r.close()  # Liberar conexión y buffers
     except Exception:
         try:
             os.remove(nuevo_exe)

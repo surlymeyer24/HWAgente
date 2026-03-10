@@ -3,15 +3,17 @@ import platform
 import subprocess
 import os
 import sys
+import gc
+import json
+import time
 import requests
 import win32evtlog
 import win32evtlogutil
 import win32con
-import gc
-import win32evtlog
-import win32evtlogutil
-import win32con
-import gc
+
+# Sesión HTTP reutilizable (evita crear conexiones nuevas cada vez)
+_sesion_http = requests.Session()
+_sesion_http.headers.update({'Connection': 'close'})
 
 try:
     from src.core.perifericos import obtener_todos_los_perifericos
@@ -204,14 +206,15 @@ def obtener_errores_sistema(limite=5):  # REDUCIDO DE 10 A 5
     """Obtiene errores críticos recientes (optimizado)"""
     errores = []
     
+    hand = None
     try:
         hand = win32evtlog.OpenEventLog(None, "System")
         flags = win32evtlog.EVENTLOG_BACKWARDS_READ | win32evtlog.EVENTLOG_SEQUENTIAL_READ
-        
+
         eventos = win32evtlog.ReadEventLog(hand, flags, 0)
-        
-        for evento in eventos[:50]:  # REDUCIDO DE 100 A 50
-            if evento.EventType == win32con.EVENTLOG_ERROR_TYPE:  # SOLO ERRORES, NO WARNINGS
+
+        for evento in eventos[:50]:
+            if evento.EventType == win32con.EVENTLOG_ERROR_TYPE:
                 try:
                     mensaje = win32evtlogutil.SafeFormatMessage(evento, "System")
                     if mensaje:
@@ -220,7 +223,7 @@ def obtener_errores_sistema(limite=5):  # REDUCIDO DE 10 A 5
                         mensaje = "Sin descripción"
                 except:
                     mensaje = "Error al leer mensaje"
-                
+
                 errores.append({
                     "fecha": evento.TimeGenerated.Format(),
                     "tipo": "Error",
@@ -228,16 +231,22 @@ def obtener_errores_sistema(limite=5):  # REDUCIDO DE 10 A 5
                     "evento_id": evento.EventID,
                     "mensaje": mensaje
                 })
-                
+
                 if len(errores) >= limite:
                     break
-        
-        win32evtlog.CloseEventLog(hand)
-        
+
+        del eventos  # Liberar lista de eventos
+
     except Exception as e:
         errores.append({
             "error": f"No se pudo leer Event Viewer: {str(e)}"
         })
+    finally:
+        if hand:
+            try:
+                win32evtlog.CloseEventLog(hand)
+            except:
+                pass
     
     return errores
 
@@ -337,9 +346,11 @@ def obtener_ip_publica():
     
     for url in servidores_ip:
         try:
-            respuesta = requests.get(url, timeout=3)  # REDUCIDO DE 5 A 3
-            if respuesta.status_code == 200:
-                return respuesta.text.strip()
+            respuesta = _sesion_http.get(url, timeout=3)
+            ip = respuesta.text.strip() if respuesta.status_code == 200 else None
+            respuesta.close()
+            if ip:
+                return ip
         except Exception:
             continue
             
@@ -348,7 +359,6 @@ def obtener_ip_publica():
 
 def obtener_aplicaciones_activas():
     """Obtiene top 10 apps (REDUCIDO DE 15)"""
-    import json
     
     powershell_script = """
     $apps = @{}
@@ -418,25 +428,27 @@ def obtener_aplicaciones_activas():
                     'procesos': app['Processes']
                 })
             
-            # CPU rápido con psutil
+            # CPU rápido con psutil (una sola iteración)
             cpu_data = {}
-            for proc in psutil.process_iter(['name']):
+            procs = list(psutil.process_iter(['name']))
+            for proc in procs:
                 try:
                     proc.cpu_percent()
                 except:
                     pass
-            
-            import time
-            time.sleep(0.2)  # REDUCIDO DE 0.3 A 0.2
-            
-            for proc in psutil.process_iter(['name', 'cpu_percent']):
+
+            time.sleep(0.2)
+
+            for proc in procs:
                 try:
-                    nombre = proc.info['name']
+                    nombre = proc.name()
+                    cpu = proc.cpu_percent()
                     if nombre not in cpu_data:
                         cpu_data[nombre] = 0
-                    cpu_data[nombre] += proc.info['cpu_percent']
-                except:
+                    cpu_data[nombre] += cpu
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
                     pass
+            del procs
             
             for app in apps_formateadas:
                 nombre_sin_exe = app['nombre'].replace('.exe', '.exe')
@@ -452,29 +464,29 @@ def obtener_aplicaciones_activas():
 
 
 def obtener_aplicaciones_activas_fallback():
-    """Fallback usando psutil"""
+    """Fallback usando psutil (una sola iteración)"""
     apps_agrupadas = {}
-    
-    for proc in psutil.process_iter(['name']):
+
+    procs = list(psutil.process_iter(['name', 'memory_info']))
+    for proc in procs:
         try:
             proc.cpu_percent()
         except:
             pass
-    
-    import time
+
     time.sleep(0.3)
-    
-    for proc in psutil.process_iter(['name', 'cpu_percent', 'memory_info']):
+
+    for proc in procs:
         try:
-            nombre = proc.info['name']
-            
-            if nombre.lower() in ['svchost.exe', 'conhost.exe', 'idle', 'system', 
+            nombre = proc.name()
+
+            if nombre.lower() in ['svchost.exe', 'conhost.exe', 'idle', 'system',
                                    'registry', 'smss.exe', 'csrss.exe', 'wininit.exe',
                                    'services.exe', 'lsass.exe', 'dwm.exe']:
                 continue
-            
-            ram_mb = proc.info['memory_info'].rss / (1024 * 1024)
-            cpu_pct = proc.info['cpu_percent']
+
+            ram_mb = proc.memory_info().rss / (1024 * 1024)
+            cpu_pct = proc.cpu_percent()
             
             if nombre not in apps_agrupadas:
                 apps_agrupadas[nombre] = {
@@ -500,6 +512,7 @@ def obtener_aplicaciones_activas_fallback():
             'procesos': app['procesos']
         })
     
+    del procs
     apps_con_recursos.sort(key=lambda x: x['ram_mb'], reverse=True)
     return apps_con_recursos[:10]  # REDUCIDO DE 15 A 10
 
@@ -562,10 +575,13 @@ def obtener_datos_pc(incluir_pesados=True):
         datos["ip_publica"] = obtener_ip_publica()
         datos["anydesk_id"] = obtener_id_anydesk()
         datos["aplicaciones_activas"] = obtener_aplicaciones_activas()
+        gc.collect()  # Liberar tras apps (subproceso PowerShell pesado)
+
         datos["errores_recientes"] = obtener_errores_sistema(limite=5)
 
         if PERIFERICOS_DISPONIBLE:
             datos["perifericos"] = obtener_todos_los_perifericos()
+            gc.collect()  # Liberar tras periféricos (múltiples subprocesos)
 
         if WINDOWS_UPDATES_DISPONIBLE:
             datos["windows_updates"] = obtener_resumen_updates()
@@ -573,7 +589,7 @@ def obtener_datos_pc(incluir_pesados=True):
         if SOFTWARE_CRITICO_DISPONIBLE:
             datos["software_critico"] = obtener_software_critico()
 
-    # Liberar memoria
+    # Liberar memoria final
     gc.collect()
     
     return datos
