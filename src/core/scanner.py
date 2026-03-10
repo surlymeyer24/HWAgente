@@ -518,32 +518,14 @@ def obtener_usuarios():
 
 
 def obtener_id_inventario():
-    """
-    UUID persistido localmente en ProgramData.
-    Se genera una sola vez por máquina y se reutiliza siempre.
-    Evita colisiones por MachineGuid duplicado (OEM, clones, etc.).
-    """
-    import uuid as _uuid
-    uuid_dir = os.path.join(os.environ.get("ProgramData", r"C:\ProgramData"), "AgenteMonitoreo")
-    uuid_path = os.path.join(uuid_dir, "agent_uuid.txt")
-    # Leer UUID existente
     try:
-        if os.path.exists(uuid_path):
-            with open(uuid_path, "r", encoding="utf-8") as f:
-                saved = f.read().strip()
-                if saved:
-                    return saved
-    except Exception:
-        pass
-    # Generar nuevo UUID y persistir
-    nuevo = str(_uuid.uuid4())
-    try:
-        os.makedirs(uuid_dir, exist_ok=True)
-        with open(uuid_path, "w", encoding="utf-8") as f:
-            f.write(nuevo)
+        cmd = 'wmic csproduct get uuid'
+        resultado = subprocess.check_output(cmd, shell=True).decode().split('\n')
+        uuid = resultado[1].strip()
+        return uuid
     except Exception as e:
-        print(f"Error guardando UUID local: {e}")
-    return nuevo
+        print(f"Error obteniendo UUID: {e}")
+        return platform.node()
 
 
 def obtener_datos_pc(incluir_pesados=True):
