@@ -48,6 +48,21 @@ jobs:
           print("auth/serviceAccountKey.json creado OK")
           '
 
+      - name: Bump version in config.py
+        shell: bash
+        env:
+          VERSION: ${{ github.event.inputs.version }}
+        run: |
+          python - <<'PYEOF'
+          import os, re
+          version = os.environ["VERSION"].lstrip("v")
+          path = "config/config.py"
+          content = open(path).read()
+          content = re.sub(r'VERSION\s*=\s*"[^"]*"', f'VERSION = "{version}"', content)
+          open(path, "w").write(content)
+          print("VERSION actualizada a", version)
+          PYEOF
+
       - name: Build AgenteBacar.exe
         run: pyinstaller AgenteBacar.spec --clean
 
