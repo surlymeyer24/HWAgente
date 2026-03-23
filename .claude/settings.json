@@ -1,12 +1,15 @@
 {
   "permissions": {
     "allow": [
-      "Read(//c/Users/Usr/Documents/CyberWatch/Front/**)"
+      "Read(//c/Users/Usr/Documents/CyberWatch/Front/**)",
+      "Read(//c/Users/Usr/Documents/**)",
+      "Bash(firebase deploy:*)"
     ],
     "additionalDirectories": [
       "c:\\Users\\Usr\\Documents\\CyberWatch\\Front\\src\\types",
       "c:\\Users\\Usr\\Documents\\CyberWatch\\Front\\src\\lib",
-      "c:\\Users\\Usr\\Documents\\CyberWatch\\Front\\src\\pages"
+      "c:\\Users\\Usr\\Documents\\CyberWatch\\Front\\src\\pages",
+      "c:\\Users\\Usr\\Documents\\CyberWatch"
     ]
   }
 }

@@ -56,13 +56,23 @@ def obtener_hostname():
     return (name and name.strip()) or "PC-Desconocida"
 
 
+def _detectar_windows():
+    """Detecta correctamente Windows 10 vs 11 (platform.release() devuelve '10' para ambos)."""
+    try:
+        build = int(platform.version().split('.')[2])
+        version = '11' if build >= 22000 else platform.release()
+        return f"Windows {version}"
+    except Exception:
+        return f"{platform.system()} {platform.release()}"
+
+
 def inicializar_cache():
     """Cachea datos que nunca cambian (se llama 1 vez al inicio)"""
     global _CACHE_ESTATICO
     if not _CACHE_ESTATICO:
         _CACHE_ESTATICO = {
             'hostname': obtener_hostname(),
-            'sistema_operativo': f"{platform.system()} {platform.release()}",
+            'sistema_operativo': _detectar_windows(),
             'arquitectura': platform.machine(),
             'procesador': platform.processor(),
             'nucleos_fisicos': psutil.cpu_count(logical=False),

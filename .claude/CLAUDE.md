@@ -92,6 +92,30 @@ Cada vez que se implemente un cambio significativo (nueva feature, fix de bug, c
 
 ---
 
+## Error en release: verificar si la clave fue expuesta
+
+Si el `git push` o el workflow de GitHub Actions falla con un error relacionado a secretos o credenciales, verificar primero si el archivo `auth/serviceAccountKey.json` (u otro archivo con credenciales) fue incluido accidentalmente en algún commit.
+
+**Síntomas típicos:**
+- GitHub bloquea el push con "GH013: Repository rule violations found" / "Push cannot contain secrets"
+- El workflow falla por credenciales inválidas o revocadas
+
+**Procedimiento:**
+1. Revisar el historial reciente con `git log --name-only` para detectar si se committeó algún archivo de `auth/`
+2. Si fue expuesto: rotar la service account en Google Cloud Console (IAM → Service Accounts → crear nueva key, revocar la anterior) y actualizar el secret `FIREBASE_SERVICE_ACCOUNT_B64` en GitHub
+3. Limpiar el commit que contiene el secreto antes de pushear:
+   ```bash
+   git rm --cached auth/<archivo>.json
+   echo "auth/" >> .gitignore
+   git add .gitignore
+   git commit --amend --no-edit
+   git push origin main
+   ```
+
+**Regla:** El directorio `auth/` nunca debe aparecer en `git status` como staged o committed. Si aparece, detener y seguir el procedimiento anterior.
+
+---
+
 ## Recordar push antes del release
 
 Al terminar de implementar una funcionalidad o fix, SIEMPRE recordar al usuario:

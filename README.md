@@ -81,7 +81,7 @@ Los comandos se envían desde el frontend escribiendo en el documento `tareas/{u
   - `computadoras` — datos de cada PC (ID = UUID del motherboard)
   - `tareas` — comandos remotos por UUID
   - `config/agente` — URL del ejecutable para actualizaciones
-  - `logs_actualizaciones` — historial de actualizaciones del agente
+  - `logs_actualizaciones` — historial de todos los comandos ejecutados por el agente (ACTUALIZAR_DATOS, INSTALAR_UPDATES, ACTUALIZAR_AGENTE)
 
 ---
 
@@ -116,10 +116,9 @@ El proyecto usa GitHub Actions para compilar y publicar el `.exe`:
 gh workflow run build-and-deploy.yml --field version=v2.5.0
 ```
 
-El workflow:
-1. Compila con PyInstaller en `windows-latest`
-2. Publica el `.exe` como GitHub Release
-3. Actualiza la URL en Firestore (`config/agente.url`) para que los agentes existentes puedan auto-actualizarse
+El workflow tiene dos jobs:
+1. `build-and-deploy` (`windows-latest`): compila con PyInstaller y publica el `.exe` como GitHub Release
+2. `update-firestore` (`ubuntu-latest`): actualiza la URL en Firestore (`config/agente.url`) para que los agentes existentes puedan auto-actualizarse (job separado para evitar problemas de crypto en Windows)
 
 **Secret requerido:** `FIREBASE_SERVICE_ACCOUNT_B64` — el `serviceAccountKey.json` codificado en base64.
 
@@ -134,7 +133,7 @@ python -c "import base64; print(base64.b64encode(open('auth/serviceAccountKey.js
 | Archivo | Contenido |
 |---------|-----------|
 | `C:\agente_debug.txt` | Operaciones de Firebase y errores |
-| `C:\agente_actualizaciones.jsonl` | Historial de actualizaciones (JSON Lines) |
+| `C:\agente_actualizaciones.jsonl` | Historial de todos los comandos remotos ejecutados (JSON Lines, un evento por línea) |
 
 ---
 

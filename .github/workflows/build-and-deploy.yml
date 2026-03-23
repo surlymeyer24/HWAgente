@@ -1,5 +1,16 @@
-# Secret FIREBASE_SERVICE_ACCOUNT_B64 = base64 del serviceAccountKey.json (para actualizar Firestore)
-# Crear: python -c "import base64; print(base64.b64encode(open('auth/serviceAccountKey.json','rb').read()).decode())"
+# Secretos necesarios en GitHub → Settings → Secrets and variables → Actions:
+#
+#   FIREBASE_SERVICE_ACCOUNT_B64
+#     Base64 del serviceAccountKey.json (Firebase Console → Configuración → Cuentas de servicio).
+#     Generar con:
+#       python -c "import base64; print(base64.b64encode(open('auth/serviceAccountKey.json','rb').read()).decode())"
+#     O en PowerShell:
+#       [Convert]::ToBase64String([IO.File]::ReadAllBytes('auth\serviceAccountKey.json'))
+#
+# ADVERTENCIA DE SEGURIDAD:
+#   Las credenciales Firebase quedan embebidas en el .exe via PyInstaller.
+#   Asegúrate de que la cuenta de servicio tenga permisos mínimos (solo escritura en Firestore).
+
 name: Build and Deploy Agente
 
 on:
@@ -17,6 +28,11 @@ concurrency:
 jobs:
   build-and-deploy:
     runs-on: windows-latest
+    permissions:
+      contents: write
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -29,22 +45,27 @@ jobs:
       - name: Install dependencies
         run: pip install firebase-admin pywin32 psutil requests wmi pyinstaller
 
-      - name: Create auth folder for build
+      - name: Decode Firebase credentials
         shell: bash
         env:
           FIREBASE_SERVICE_ACCOUNT_B64: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_B64 }}
         run: |
           python -c '
           import os, base64, json
-          s = os.environ.get("FIREBASE_SERVICE_ACCOUNT_B64")
+          s = os.environ.get("FIREBASE_SERVICE_ACCOUNT_B64", "").strip().replace("\n","").replace("\r","").replace(" ","")
           if not s:
-              raise SystemExit("ERROR: Secret FIREBASE_SERVICE_ACCOUNT_B64 no configurado. Ver docs en el workflow.")
-          s = s.strip().replace("\n", "").replace("\r", "").replace(" ", "")
+              raise SystemExit("ERROR: Secret FIREBASE_SERVICE_ACCOUNT_B64 no configurado. Ver comentarios en el workflow.")
           raw = base64.b64decode(s).decode("utf-8")
-          json.loads(raw)
+          sa = json.loads(raw)  # Validar que es JSON válido
+          print("project_id:     ", sa.get("project_id"))
+          print("client_email:   ", sa.get("client_email"))
+          print("private_key_id: ", sa.get("private_key_id"))
+          print("type:           ", sa.get("type"))
           os.makedirs("auth", exist_ok=True)
-          with open("auth/serviceAccountKey.json", "w") as f:
-              f.write(raw)
+          # Escribir en modo binario para evitar conversión CRLF en Windows
+          clean = json.dumps(sa, ensure_ascii=False).encode("utf-8")
+          with open("auth/serviceAccountKey.json", "wb") as f:
+              f.write(clean)
           print("auth/serviceAccountKey.json creado OK")
           '
 
@@ -70,32 +91,39 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.event.inputs.version }}
+          name: AgenteBacar ${{ github.event.inputs.version }}
           files: dist/AgenteBacar.exe
           generate_release_notes: true
-          replace_existing: true
+          overwrite_files: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+  # Job separado en Ubuntu para evitar problemas de crypto en Windows
+  update-firestore:
+    runs-on: ubuntu-latest
+    needs: build-and-deploy
+    steps:
       - name: Update Firestore config/agente.url
-        shell: bash
         env:
           VERSION: ${{ github.event.inputs.version }}
           GITHUB_REPOSITORY: ${{ github.repository }}
+          FIREBASE_SERVICE_ACCOUNT_B64: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_B64 }}
         run: |
+          pip install firebase-admin -q
           python - <<'PYEOF'
-          import os, json, firebase_admin
+          import os, base64, json, firebase_admin
           from firebase_admin import credentials, firestore
 
-          with open("auth/serviceAccountKey.json") as f:
-              sa = json.load(f)
+          s = os.environ.get("FIREBASE_SERVICE_ACCOUNT_B64", "").strip().replace("\n","").replace("\r","").replace(" ","")
+          sa = json.loads(base64.b64decode(s).decode("utf-8"))
 
           version = os.environ.get("VERSION", "v1.0.0")
-          repo = os.environ.get("GITHUB_REPOSITORY", "")
+          repo    = os.environ.get("GITHUB_REPOSITORY", "")
           url = f"https://github.com/{repo}/releases/download/{version}/AgenteBacar.exe"
 
           cred = credentials.Certificate(sa)
           firebase_admin.initialize_app(cred)
           db = firestore.client()
           db.collection("config").document("agente").set({"url": url}, merge=True)
-          print("Firestore actualizado:", url)
+          print("Firestore actualizado →", url)
           PYEOF

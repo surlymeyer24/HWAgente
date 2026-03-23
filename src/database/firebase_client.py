@@ -214,6 +214,11 @@ def escuchar_comandos_remotos(uuid_pc, evento_actualizar=None):
 
                 if comando == "ACTUALIZAR_DATOS":
                     log_debug("Comando recibido: ACTUALIZAR_DATOS")
+                    registrar_log_actualizacion(
+                        "ACTUALIZAR_DATOS",
+                        "Sincronización completa de datos solicitada",
+                        uuid=uuid_pc,
+                    )
                     tareas_ref.update({"comando": "PROCESANDO..."})
                     try:
                         nuevos_datos = obtener_datos_pc(incluir_pesados=True)
@@ -222,11 +227,26 @@ def escuchar_comandos_remotos(uuid_pc, evento_actualizar=None):
                             "comando": "PROCESADO",
                             "fecha_comando_ejecutado": firestore.SERVER_TIMESTAMP
                         })
+                        registrar_log_actualizacion(
+                            "ACTUALIZAR_DATOS_OK",
+                            "Datos sincronizados correctamente",
+                            uuid=uuid_pc,
+                        )
                     except Exception as e:
                         log_debug(f"Error comando: {e}")
+                        registrar_log_actualizacion(
+                            "ERROR",
+                            f"Error en ACTUALIZAR_DATOS: {e}",
+                            uuid=uuid_pc,
+                        )
 
                 elif comando == "INSTALAR_UPDATES":
                     log_debug("Comando recibido: INSTALAR_UPDATES")
+                    registrar_log_actualizacion(
+                        "INSTALAR_UPDATES",
+                        "Instalación de Windows Updates solicitada",
+                        uuid=uuid_pc,
+                    )
                     tareas_ref.update({"comando": "INSTALANDO_UPDATES..."})
                     try:
                         from src.core.windows_updates import instalar_updates
@@ -237,11 +257,22 @@ def escuchar_comandos_remotos(uuid_pc, evento_actualizar=None):
                             "fecha_comando_ejecutado": firestore.SERVER_TIMESTAMP
                         })
                         log_debug(f"Updates instalados: {resultado}")
+                        estado = resultado.get("estado", "?") if isinstance(resultado, dict) else str(resultado)
+                        registrar_log_actualizacion(
+                            "INSTALAR_UPDATES_OK",
+                            f"Updates instalados — estado: {estado}",
+                            uuid=uuid_pc,
+                        )
                         # Sync completa para reflejar el nuevo estado
                         nuevos_datos = obtener_datos_pc(incluir_pesados=True)
                         enviar_datos_pc(nuevos_datos, forzar_completo=True)
                     except Exception as e:
                         log_debug(f"Error instalando updates: {e}")
+                        registrar_log_actualizacion(
+                            "ERROR",
+                            f"Error en INSTALAR_UPDATES: {e}",
+                            uuid=uuid_pc,
+                        )
                         tareas_ref.update({
                             "comando": "UPDATES_ERROR",
                             "resultado_updates": {"estado": "error", "mensaje": str(e)},
