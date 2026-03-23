@@ -4,6 +4,7 @@ import os
 import platform
 import time
 import sys
+import json
 
 # Para ACTUALIZAR_AGENTE: el listener escribe aquí la URL y despierta al bucle
 _url_actualizacion_pendiente_list = [None]
@@ -37,6 +38,42 @@ def log_debug(mensaje):
             f.write(f"{time.ctime()}: [Firebase] {mensaje}\n")
     except:
         pass
+
+
+_LOG_ACTUALIZACIONES_PATH = (
+    "C:\\agente_actualizaciones.jsonl" if os.path.exists("C:\\") else "agente_actualizaciones.jsonl"
+)
+
+
+def registrar_log_actualizacion(evento, detalle="", uuid=None, hostname=None):
+    """
+    Guarda un evento del proceso de actualización del agente:
+      - Localmente en agente_actualizaciones.jsonl (JSON Lines)
+      - En Firestore colección 'logs_actualizaciones'
+    """
+    ts_str = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    entrada = {
+        "timestamp": ts_str,
+        "evento": evento,
+        "detalle": detalle,
+        "uuid": uuid or "",
+        "hostname": hostname or _obtener_hostname(),
+        "version_agente": VERSION_AGENTE or "?",
+    }
+
+    # --- Log local ---
+    try:
+        with open(_LOG_ACTUALIZACIONES_PATH, "a", encoding="utf-8") as f:
+            f.write(json.dumps(entrada, ensure_ascii=False) + "\n")
+    except Exception as e:
+        log_debug(f"Error escribiendo log local: {e}")
+
+    # --- Log en Firestore ---
+    try:
+        doc_data = {**entrada, "timestamp": firestore.SERVER_TIMESTAMP}
+        db.collection("logs_actualizaciones").add(doc_data)
+    except Exception as e:
+        log_debug(f"Error escribiendo log en Firestore: {e}")
 
 # Importación robusta de configuración
 try:
@@ -213,6 +250,11 @@ def escuchar_comandos_remotos(uuid_pc, evento_actualizar=None):
 
                 elif comando == "ACTUALIZAR_AGENTE":
                     log_debug("Comando recibido: ACTUALIZAR_AGENTE")
+                    registrar_log_actualizacion(
+                        "COMANDO_RECIBIDO",
+                        "Comando ACTUALIZAR_AGENTE recibido desde Firebase",
+                        uuid=uuid_pc,
+                    )
                     tareas_ref.update({"comando": "DESCARGANDO_AGENTE..."})
                     try:
                         doc_agente = db.collection("config").document("agente").get()
@@ -221,6 +263,11 @@ def escuchar_comandos_remotos(uuid_pc, evento_actualizar=None):
                             data = doc_agente.to_dict() or {}
                             url = (data.get("url") or "").strip()
                         if url:
+                            registrar_log_actualizacion(
+                                "URL_ENCONTRADA",
+                                f"URL de descarga: {url[:80]}",
+                                uuid=uuid_pc,
+                            )
                             _url_actualizacion_pendiente_list[0] = url
                             if evento_actualizar is not None:
                                 try:
@@ -232,7 +279,17 @@ def escuchar_comandos_remotos(uuid_pc, evento_actualizar=None):
                                 "comando": "ACTUALIZACION_PROGRAMADA",
                                 "fecha_comando_ejecutado": firestore.SERVER_TIMESTAMP
                             })
+                            registrar_log_actualizacion(
+                                "ACTUALIZACION_PROGRAMADA",
+                                "Descarga programada; el agente se reemplazará y reiniciará",
+                                uuid=uuid_pc,
+                            )
                         else:
+                            registrar_log_actualizacion(
+                                "ERROR",
+                                "Falta config/agente con campo url en Firestore",
+                                uuid=uuid_pc,
+                            )
                             tareas_ref.update({
                                 "comando": "ACTUALIZAR_AGENTE_ERROR",
                                 "resultado_updates": {"estado": "error", "mensaje": "Falta config/agente con campo url"},
@@ -240,6 +297,11 @@ def escuchar_comandos_remotos(uuid_pc, evento_actualizar=None):
                             })
                     except Exception as e:
                         log_debug(f"Error ACTUALIZAR_AGENTE: {e}")
+                        registrar_log_actualizacion(
+                            "ERROR",
+                            f"Excepción en ACTUALIZAR_AGENTE: {e}",
+                            uuid=uuid_pc,
+                        )
                         tareas_ref.update({
                             "comando": "ACTUALIZAR_AGENTE_ERROR",
                             "resultado_updates": {"estado": "error", "mensaje": str(e)},

@@ -122,7 +122,7 @@ if RUNNING_AS_SERVICE:
                             )
                             from src.core.auto_update import download_and_apply_update
                             url = _url_actualizacion_pendiente()
-                            if url and download_and_apply_update(url):
+                            if url and download_and_apply_update(url, uuid=datos.get('uuid')):
                                 log_debug("Actualizacion programada; reinicio en breve.")
                                 self.running = False
                                 break

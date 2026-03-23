@@ -15,13 +15,20 @@ import tempfile
 SERVICIO_NOMBRE = "AgenteMonitoreo"
 
 
-def download_and_apply_update(url):
+def download_and_apply_update(url, uuid=None, hostname=None):
     """
     Descarga el .exe desde url, escribe un .bat que para el servicio,
     reemplaza el exe y arranca de nuevo. Lanza el .bat desacoplado y retorna True.
     El proceso debe terminar después para que el batch pueda reemplazar el exe.
     Solo tiene sentido cuando getattr(sys, 'frozen', False).
     """
+    def _log(evento, detalle=""):
+        try:
+            from src.database.firebase_client import registrar_log_actualizacion
+            registrar_log_actualizacion(evento, detalle, uuid=uuid, hostname=hostname)
+        except Exception:
+            pass
+
     if not getattr(sys, "frozen", False):
         return False
     exe_actual = sys.executable
@@ -29,6 +36,7 @@ def download_and_apply_update(url):
     nombre_exe = os.path.basename(exe_actual)
     nuevo_exe = os.path.join(carpeta, nombre_exe.replace(".exe", "_new.exe"))
 
+    _log("DESCARGA_INICIADA", f"Descargando desde: {url[:80]}")
     try:
         import requests
         r = requests.get(url, timeout=120, stream=True)
@@ -40,7 +48,8 @@ def download_and_apply_update(url):
                         f.write(chunk)
         finally:
             r.close()  # Liberar conexión y buffers
-    except Exception:
+    except Exception as e:
+        _log("DESCARGA_FALLIDA", f"Error al descargar: {e}")
         try:
             os.remove(nuevo_exe)
         except Exception:
@@ -48,11 +57,14 @@ def download_and_apply_update(url):
         return False
 
     if not os.path.isfile(nuevo_exe) or os.path.getsize(nuevo_exe) < 100000:
+        _log("DESCARGA_FALLIDA", "Archivo descargado inválido o demasiado pequeño")
         try:
             os.remove(nuevo_exe)
         except Exception:
             pass
         return False
+
+    _log("DESCARGA_EXITOSA", f"Archivo descargado: {os.path.getsize(nuevo_exe)} bytes")
 
     # Batch: esperar, parar servicio, copiar exe, arrancar servicio
     bat_lines = [
@@ -70,7 +82,8 @@ def download_and_apply_update(url):
     try:
         os.write(fd, bat_content.encode("utf-8"))
         os.close(fd)
-    except Exception:
+    except Exception as e:
+        _log("ERROR", f"Error creando script de instalación: {e}")
         os.close(fd)
         try:
             os.remove(nuevo_exe)
@@ -88,7 +101,9 @@ def download_and_apply_update(url):
             close_fds=True,
             cwd=os.path.dirname(bat_path),
         )
-    except Exception:
+        _log("REEMPLAZO_INICIADO", "Script de reemplazo lanzado; el servicio se reiniciará")
+    except Exception as e:
+        _log("ERROR", f"Error lanzando script de instalación: {e}")
         try:
             os.remove(bat_path)
             os.remove(nuevo_exe)

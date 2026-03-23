@@ -1,14 +1,40 @@
+# === CREDENCIALES — nunca subir ===
+auth/
 serviceAccountKey.json
-./build/
-./dist/
+*-firebase-adminsdk-*.json
+*.p12
+*.pfx
+
+# === LOGS LOCALES DEL AGENTE ===
+agente_debug.txt
+agente_actualizaciones.jsonl
+*.jsonl
+
+# === PYTHON ===
 __pycache__/
 *.pyc
-.env
+*.pyo
+*.pyd
+.venv/
+
+# === BUILD / DIST (PyInstaller) ===
+/build/
+/dist/
+
+# === EDITORES / IDEs ===
 .vscode/
 .idea/
 .DS_Store
-codigo_completo_python.txt
-export_project.ps1
+
+# === EXPORTACIONES / DUMPS ===
 firebase_dump.json
 firebase_dump.md
-auth/
+codigo_completo_python.txt
+export_project.ps1
+
+# === VARIABLES DE ENTORNO ===
+.env
+.env.*
+
+# === ARCHIVOS TEMPORALES ===
+Untitled

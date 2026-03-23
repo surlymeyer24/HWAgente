@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//c/Users/Usr/Documents/CyberWatch/Front/**)"
+    ],
+    "additionalDirectories": [
+      "c:\\Users\\Usr\\Documents\\CyberWatch\\Front\\src\\types",
+      "c:\\Users\\Usr\\Documents\\CyberWatch\\Front\\src\\lib",
+      "c:\\Users\\Usr\\Documents\\CyberWatch\\Front\\src\\pages"
+    ]
+  }
+}
