@@ -218,7 +218,9 @@ _HID_GENERICOS = ('dispositivo de entrada usb', 'usb input device', 'hid-complia
 
 # Mapeo de clases a categorías amigables
 _CATEGORIAS_USB = {
-    'HIDClass': 'Teclado/Mouse/Controlador',
+    'Keyboard': 'Teclado',
+    'Mouse': 'Mouse',
+    'HIDClass': 'Controlador HID',
     'Image': 'Cámara/Scanner',
     'Media': 'Audio/Video',
     'DiskDrive': 'Almacenamiento (pendrive/disco)',
@@ -252,6 +254,49 @@ def _es_hid_generico(nombre: str) -> bool:
     """Verifica si es un HID genérico (teclado/mouse sin nombre de modelo)"""
     nombre_norm = _normalizar_para_comparacion(nombre)
     return any(term in nombre_norm for term in _HID_GENERICOS)
+
+
+def _clasificar_hid(nombre: str, clase: str) -> str | None:
+    """
+    Clasifica un dispositivo HID como 'teclado', 'mouse' o 'otro_hid'.
+    Retorna None si no es un dispositivo HID genérico.
+    """
+    clase_lower = (clase or '').lower()
+
+    # Clases PnP explícitas de Windows
+    if clase_lower == 'keyboard':
+        return 'teclado'
+    if clase_lower == 'mouse':
+        return 'mouse'
+
+    # Para HIDClass, inspeccionar el nombre
+    if clase_lower == 'hidclass' and _es_hid_generico(nombre):
+        nombre_norm = _normalizar_para_comparacion(nombre)
+        if any(kw in nombre_norm for kw in ('keyboard', 'teclado', 'kbd')):
+            return 'teclado'
+        if any(kw in nombre_norm for kw in ('mouse', 'raton', 'pointing')):
+            return 'mouse'
+        return 'otro_hid'
+
+    return None
+
+
+def _extraer_marca(dispositivo: dict) -> str:
+    """Retorna fabricante si es conocido; si no, intenta usar el nombre del dispositivo."""
+    fab = dispositivo.get('fabricante', '—')
+    if fab and fab != '—':
+        return fab
+    nombre = dispositivo.get('nombre', '')
+    nombre_norm = _normalizar_para_comparacion(nombre)
+    if nombre and not nombre_norm.startswith(('hid', 'usb', 'generic', 'desconocido')):
+        # Quitar sufijo genérico si hay uno (ej: "Logitech - HID Keyboard Device" → "Logitech")
+        if ' - ' in nombre:
+            partes = nombre.split(' - ', 1)
+            sufijo_norm = _normalizar_para_comparacion(partes[1])
+            if sufijo_norm.startswith(('hid', 'usb', 'generic')):
+                return partes[0].strip()
+        return nombre
+    return '—'
 
 
 def _normalizar_nombre_usb(nombre: str, fabricante: str) -> str:
@@ -303,33 +348,73 @@ def obtener_dispositivos_usb():
                     continue
                 
                 nombre_final = _normalizar_nombre_usb(nombre, fabricante)
-                clave = f"{nombre_final}|{clase}"
-                
+
+                # Los HID genéricos no se deduplicан: puede haber varios físicamente
+                # distintos con el mismo nombre (ej: teclado y mouse ambos = "Dispositivo de entrada USB")
+                hid_tipo = _clasificar_hid(nombre, clase)
+                if hid_tipo is not None:
+                    # Usar contador para permitir múltiples HID genéricos
+                    clave = f"{nombre_final}|{clase}|{sum(1 for c in vistos if c.startswith(f'{nombre_final}|{clase}'))}"
+                else:
+                    clave = f"{nombre_final}|{clase}"
+
                 if clave in vistos:
                     continue
                 vistos.add(clave)
-                
+
                 categoria = _CATEGORIAS_USB.get(clase, clase)
-                
+
                 dispositivos.append({
                     'nombre': nombre_final,
                     'categoria': categoria,
                     'fabricante': fabricante or '—',
                     'clase': clase,
-                    '_es_generico_hid': clase == 'HIDClass' and _es_hid_generico(nombre)
+                    '_hid_tipo': hid_tipo,
                 })
-            
-            # Consolidar teclados/mouse genéricos en una sola línea
-            genericos = [d for d in dispositivos if d.pop('_es_generico_hid', False)]
-            otros = [d for d in dispositivos if d not in genericos]
-            if genericos:
-                count = len(genericos)
+
+            # Separar teclados, mouses y HID ambiguos
+            teclados = [d for d in dispositivos if d.get('_hid_tipo') == 'teclado']
+            mouses = [d for d in dispositivos if d.get('_hid_tipo') == 'mouse']
+            otros_hid = [d for d in dispositivos if d.get('_hid_tipo') == 'otro_hid']
+            otros = [d for d in dispositivos if d.get('_hid_tipo') is None]
+
+            # Fallback: si hay HID ambiguos pero no se detectó teclado ni mouse,
+            # asumir 1ro=teclado, 2do=mouse (combinación más común)
+            if otros_hid and not teclados and not mouses:
+                if len(otros_hid) >= 1:
+                    teclados = [otros_hid[0]]
+                if len(otros_hid) >= 2:
+                    mouses = [otros_hid[1]]
+                otros_hid = otros_hid[2:]
+
+            if teclados:
+                n = len(teclados)
                 otros.append({
-                    'nombre': f"Teclado y Mouse" + (f" ({count} dispositivos)" if count > 1 else ""),
-                    'categoria': 'Teclado/Mouse/Controlador',
-                    'fabricante': '—',
-                    'clase': 'HIDClass'
+                    'nombre': 'Teclado' + (f' ({n} dispositivos)' if n > 1 else ''),
+                    'categoria': 'Teclado',
+                    'fabricante': _extraer_marca(teclados[0]) if n == 1 else '—',
+                    'clase': 'Keyboard',
                 })
+            if mouses:
+                n = len(mouses)
+                otros.append({
+                    'nombre': 'Mouse' + (f' ({n} dispositivos)' if n > 1 else ''),
+                    'categoria': 'Mouse',
+                    'fabricante': _extraer_marca(mouses[0]) if n == 1 else '—',
+                    'clase': 'Mouse',
+                })
+            if otros_hid:
+                n = len(otros_hid)
+                otros.append({
+                    'nombre': 'Controlador HID' + (f' ({n} dispositivos)' if n > 1 else ''),
+                    'categoria': 'Controlador HID',
+                    'fabricante': '—',
+                    'clase': 'HIDClass',
+                })
+
+            # Limpiar campo interno
+            for d in otros:
+                d.pop('_hid_tipo', None)
             dispositivos = otros
             
             # Ordenar: primero por categoría, luego por nombre
@@ -357,7 +442,9 @@ def formatear_dispositivos_usb(dispositivos: list, usar_emoji: bool = False) -> 
     
     # Iconos ASCII seguros para consola Windows; emojis opcionales
     iconos = {
-        'Teclado/Mouse/Controlador': '[KB]' if not usar_emoji else '⌨️',
+        'Teclado': '[KB]' if not usar_emoji else '⌨️',
+        'Mouse': '[MOU]' if not usar_emoji else '🖱️',
+        'Controlador HID': '[HID]' if not usar_emoji else '🎮',
         'Cámara/Scanner': '[CAM]' if not usar_emoji else '📷',
         'Almacenamiento (pendrive/disco)': '[USB]' if not usar_emoji else '💾',
         'Impresora': '[PRN]' if not usar_emoji else '🖨️',
