@@ -17,9 +17,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Versión (ej. v2.1.0)'
+        description: 'Versión del release (obligatorio). Ej. v2.3.0 — se escribe en config y en el .exe. No dejes vacío.'
         required: true
-        default: 'v1.0.0'
+        default: ''
 
 concurrency:
   group: build-and-deploy
@@ -36,6 +36,20 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Validar entrada de versión
+        shell: bash
+        env:
+          VERSION: ${{ github.event.inputs.version }}
+        run: |
+          V="${VERSION// /}"
+          if [ -z "$V" ]; then
+            echo "::error::Completá el campo 'version' del workflow (ej. v2.3.0)."
+            exit 1
+          fi
+          if [ "$V" = "v1.0.0" ]; then
+            echo "::warning::Estás publicando como v1.0.0. Si no es intencional, cancelá y poné la versión real."
+          fi
 
       - name: Set up Python 3.11
         uses: actions/setup-python@v5

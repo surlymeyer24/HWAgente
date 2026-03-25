@@ -141,7 +141,7 @@ Para cada PC que quieras actualizar repetí con su documento en **tareas** (un d
    ```bash
    python verificar_actualizaciones.py
    ```
-   En Windows CMD podés usar el atajo **`verificar_version.bat`** (mismos argumentos). Opciones útiles: **`--host TEXTO`** (filtrar por hostname), **`--json`** (salida JSON), **`-h`** (ayuda).
+   En **tu PC de administración** (con el clon del repo), podés usar **`verificar_version.bat`** desde la carpeta del proyecto (`.\verificar_version.bat` en PowerShell) o con ruta completa; no está en el PATH. **En las PCs cliente solo va el `.exe`**; ahí la versión se ve en Firebase Console → **`computadoras`** → **`version_agente`**. Argumentos del script: **`--host TEXTO`**, **`--json`**, **`-h`**.
 
    Mostrará por cada PC: hostname, **version_agente** y el **último comando** en **tareas**:
    - **ACTUALIZACION_PROGRAMADA**: recibió la orden y programó la actualización.

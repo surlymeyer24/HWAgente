@@ -71,18 +71,48 @@ Los comandos se envían desde el frontend escribiendo en el documento `tareas/{u
 4. Crea un `.bat` que detiene el servicio, reemplaza el archivo y lo reinicia
 5. El batch se ejecuta de forma desatachada y se autoeliminа
 
-### Consultar versión en PCs remotas (desde CMD)
+### Dónde vive la versión y cómo comprobarla
 
-Cada PC reporta **`version_agente`** en Firestore (`computadoras/{uuid}`). Desde una máquina con Python, credenciales (`auth/serviceAccountKey.json`) y el clon del repo podés listar hostname, versión y último comando sin entrar por RDP:
+| Qué | Dónde |
+|-----|--------|
+| **Versión del build** | `config/config.py` → constante **`VERSION`**. Debe coincidir con lo que querés mostrar en despliegue y en Firebase. |
+| **Lo que reporta cada PC** | En Firestore, documento **`computadoras/{uuid}`** → campo **`version_agente`** (la envía el agente en cada sincronización). |
+| **Último comando remoto** | **`tareas/{uuid}`** → **`comando`** (útil tras `ACTUALIZAR_AGENTE`: `ACTUALIZACION_PROGRAMADA`, `ACTUALIZAR_AGENTE_ERROR`, etc.). |
+
+**Las PCs donde solo instalaste el `.exe` no necesitan** la carpeta del proyecto, Python ni `verificar_version.bat`. El agente ya sube la versión a Firebase; la consultás **desde cualquier lugar** (navegador o tu PC de administración).
+
+**Opción A — Sin repo (solo navegador):** en [Firebase Console](https://console.firebase.google.com) → Firestore → colección **`computadoras`** → abrí el documento de esa PC (ID = UUID) y mirá el campo **`version_agente`**. Igual podés ver **`tareas`** para el último comando.
+
+**Opción B — Script en tu PC de administración** (donde sí tenés el clon del repo, Python y `auth/serviceAccountKey.json`): ahí corrés el listado de todas las máquinas sin entrar a cada remoto.
 
 | Forma | Ejemplo |
 |-------|---------|
-| **CMD / PowerShell** | `verificar_version.bat` (equivalente a `python verificar_actualizaciones.py`) |
-| Filtrar por hostname | `verificar_version.bat --host OFICINA01` (coincidencia parcial, sin distinguir mayúsculas) |
-| Salida JSON | `verificar_version.bat --json` (útil para scripts) |
+| Atajo Windows | `.\verificar_version.bat` (desde la carpeta del repo) |
+| Equivalente | `python verificar_actualizaciones.py` |
+| Una PC por hostname | `verificar_version.bat --host OFICINA01` |
+| Para scripts | `verificar_version.bat --json` |
 | Ayuda | `python verificar_actualizaciones.py -h` |
 
-El script une datos de `computadoras` y `tareas` para ver si hubo `ACTUALIZACION_PROGRAMADA`, errores de actualización, etc.
+**Importante:** `verificar_version.bat` **no está en el PATH** y **no va en las PCs cliente**; solo en la máquina donde desarrollás o administrás. Si ejecutás desde otra carpeta (por ejemplo `C:\Windows\Temp`), PowerShell no lo encuentra.
+
+```powershell
+Set-Location C:\Users\Usr\Documents\MiniAgente
+.\verificar_version.bat
+```
+
+O sin cambiar de carpeta:
+
+```powershell
+& "C:\Users\Usr\Documents\MiniAgente\verificar_version.bat"
+```
+
+(Adaptá la ruta si el clon está en otro disco o carpeta.)
+
+El script **une** `computadoras` y `tareas` por UUID. Si **`version_agente`** coincide con el **`VERSION`** del build que desplegaste, esa máquina ya está corriendo esa versión (puede demorar 1–2 minutos tras reinicio del servicio).
+
+**PowerShell:** usá `cd` / `Set-Location` a la carpeta del proyecto. El comando `cd /d` es solo de **cmd.exe**.
+
+**En una PC remota sin acceso a Firebase:** clic derecho en **`AgenteBacar.exe`** → **Propiedades** → **Detalles**. **Versión del archivo** y **Versión del producto** salen de **`config/config.py` → `VERSION`** (recurso de versión de Windows generado en `AgenteBacar.spec` al compilar). También podés usar PowerShell: `(Get-Item .\AgenteBacar.exe).VersionInfo.FileVersion`. Lo más fiable para inventario sigue siendo **`version_agente`** en Firestore.
 
 ---
 
@@ -94,7 +124,7 @@ El script une datos de `computadoras` y `tareas` para ver si hubo `ACTUALIZACION
   - `computadoras` — datos de cada PC (ID = UUID del motherboard)
   - `tareas` — comandos remotos por UUID
   - `config/agente` — URL del ejecutable para actualizaciones
-  - `logs_actualizaciones` — historial de todos los comandos ejecutados por el agente (ACTUALIZAR_DATOS, INSTALAR_UPDATES, ACTUALIZAR_AGENTE)
+  - `logs_actualizaciones` — historial de comandos y del flujo **ACTUALIZAR_AGENTE**; cada documento tiene `evento`, `detalle` y opcionalmente **`contexto`** (mapa: URL, host, HTTP, bytes, SHA256, rutas, fase del error, etc.). Eventos típicos de actualización: `ACTUALIZAR_AGENTE_RECIBIDO`, `URL_ENCONTRADA`, `ACTUALIZACION_PROGRAMADA`, `DESCARGA_*`, `REEMPLAZO_*`, `CONFIG_AGENTE_SIN_URL`, `ACTUALIZAR_AGENTE_ERROR` (también reflejado en `tareas.resultado_updates` con `fase` y `contexto`).
 
 ---
 
@@ -118,8 +148,52 @@ MiniAgente/
 │       └── firebase_client.py   # Integración con Firestore, comandos remotos
 ├── auth/
 │   └── serviceAccountKey.json   # Credenciales de Firebase (no incluido en repo)
-└── AgenteBacar.spec             # Spec de PyInstaller para compilar el .exe
+├── compilar.bat                 # Detiene el servicio (si existe), limpia build/dist, PyInstaller
+└── AgenteBacar.spec             # PyInstaller; embebe versión Windows desde config.VERSION
 ```
+
+---
+
+## Compilación local (PyInstaller)
+
+Antes de compilar, actualizá **`VERSION`** en `config/config.py` si publicás un release nuevo.
+
+**Símbolo del sistema (cmd):**
+
+```bat
+cd /d C:\Users\Usr\Documents\MiniAgente
+compilar.bat
+```
+
+O solo PyInstaller (sin `pause` del batch):
+
+```bat
+cd /d C:\Users\Usr\Documents\MiniAgente
+pyinstaller AgenteBacar.spec --clean
+```
+
+**PowerShell** (no uses `cd /d`; no existe ahí):
+
+```powershell
+Set-Location C:\Users\Usr\Documents\MiniAgente
+pyinstaller AgenteBacar.spec --clean
+```
+
+Salida: **`dist\AgenteBacar.exe`**. Hace falta **PyInstaller** y el resto de dependencias del proyecto instaladas en ese Python. El **.exe** incluye metadatos de versión (Propiedades → Detalles) alineados con **`VERSION`** en `config/config.py`.
+
+**Si en Propiedades del `.exe` ves 1.0.0.0** (o Firebase reporta `1.0.0` sin querer): suele ser un **.exe comprimido con UPX** (el spec usa **`upx=False`** para evitarlo), un build **viejo sin recurso de versión**, o un release de GitHub Actions donde **no indicaste la versión** en el campo del workflow (el job falla si queda vacío; antes un default erróneo podía dejar todo en 1.0.0). Antes de desplegar manualmente, recompilá con el **`VERSION`** correcto en `config/config.py` y comprobá **Detalles** del `dist\AgenteBacar.exe`. En runtime, **`version_agente`** en Firestore toma la **FileVersion del PE** del ejecutable cuando corre empaquetado (coincide con Propiedades).
+
+### Errores `PermissionError` al compilar
+
+Windows bloquea el borrado de **`build\`** o **`dist\AgenteBacar.exe`** si el ejecutable está en uso.
+
+1. Parar el servicio: `sc stop AgenteMonitoreo` y esperar unos segundos.
+2. Cerrar procesos del agente: `taskkill /IM AgenteBacar.exe /F`
+3. Borrar artefactos viejos y reintentar, por ejemplo en PowerShell:  
+   `Remove-Item -Recurse -Force .\build, .\dist -ErrorAction SilentlyContinue`
+4. Si sigue fallando: cerrar el IDE que tenga la carpeta abierta, probar consola **como administrador**, o revisar antivirus.
+
+Si el servicio ejecuta el `.exe` **desde `dist\`**, tenés que pararlo **siempre** antes de recompilar en esa ruta.
 
 ---
 

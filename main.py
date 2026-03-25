@@ -132,7 +132,14 @@ if RUNNING_AS_SERVICE:
                             )
                             from src.core.auto_update import download_and_apply_update
                             url = _url_actualizacion_pendiente()
-                            if url and download_and_apply_update(
+                            if not url:
+                                try:
+                                    from src.database.firebase_client import log_debug
+                                    log_debug("ACTUALIZAR_AGENTE: evento recibido pero URL pendiente vacía (condición de carrera).")
+                                except Exception:
+                                    pass
+                                continue
+                            if download_and_apply_update(
                                 url,
                                 uuid=datos.get("uuid"),
                                 hostname=datos.get("hostname"),
@@ -142,8 +149,18 @@ if RUNNING_AS_SERVICE:
                                 break
                         except Exception as e:
                             try:
-                                from src.database.firebase_client import log_debug
+                                from src.database.firebase_client import (
+                                    fallo_actualizacion_agente_remota,
+                                    log_debug,
+                                )
                                 log_debug(f"Error actualizando agente: {e}")
+                                fallo_actualizacion_agente_remota(
+                                    datos.get("uuid"),
+                                    datos.get("hostname"),
+                                    "EXCEPCION_HILO_ACTUALIZACION",
+                                    str(e),
+                                    {"tipo_excepcion": type(e).__name__},
+                                )
                             except Exception:
                                 pass
                         continue

@@ -1,10 +1,11 @@
 import firebase_admin
 from firebase_admin import credentials, firestore
+import json
 import os
 import platform
-import time
 import sys
-import json
+import time
+from urllib.parse import urlparse
 
 # Para ACTUALIZAR_AGENTE: el listener escribe aquí la URL y despierta al bucle
 _url_actualizacion_pendiente_list = [None]
@@ -80,11 +81,32 @@ def _ruta_flag_post_actualizacion():
     return os.path.join(os.path.dirname(sys.executable), FLAG_POST_AGENT_UPDATE)
 
 
-def registrar_log_actualizacion(evento, detalle="", uuid=None, hostname=None):
+def _sanear_contexto(ctx, max_str=900):
+    """Valores listos para JSON/Firestore (strings acotados, sin None)."""
+    if not ctx:
+        return None
+    out = {}
+    for k, v in ctx.items():
+        if v is None:
+            continue
+        if isinstance(v, (int, float, bool)):
+            out[str(k)] = v
+        elif isinstance(v, dict):
+            anidado = _sanear_contexto(v, max_str=min(max_str, 400))
+            if anidado:
+                out[str(k)] = anidado
+        else:
+            s = str(v)
+            out[str(k)] = s if len(s) <= max_str else s[: max_str - 3] + "..."
+    return out or None
+
+
+def registrar_log_actualizacion(evento, detalle="", uuid=None, hostname=None, extra=None):
     """
     Guarda un evento del proceso de actualización del agente:
       - Localmente en agente_actualizaciones.jsonl (JSON Lines)
       - En Firestore colección 'logs_actualizaciones'
+    extra: dict con datos estructurados (HTTP, rutas, hash, etc.) → campo "contexto".
     """
     ts_str = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     entrada = {
@@ -95,6 +117,9 @@ def registrar_log_actualizacion(evento, detalle="", uuid=None, hostname=None):
         "hostname": hostname or _obtener_hostname(),
         "version_agente": VERSION_AGENTE or "?",
     }
+    ctx = _sanear_contexto(extra)
+    if ctx:
+        entrada["contexto"] = ctx
 
     # --- Log local ---
     try:
@@ -115,16 +140,34 @@ def registrar_log_actualizacion(evento, detalle="", uuid=None, hostname=None):
         log_debug(f"Error escribiendo log en Firestore (evento={evento}): {e}")
 
 # Importación robusta de configuración
+_cfg_version = None
 try:
     import config.config as cfg
     FIREBASE_JSON_PATH = cfg.FIREBASE_JSON_PATH
     FIREBASE_COLLECTION_NAME = cfg.FIREBASE_COLLECTION_NAME
-    VERSION_AGENTE = getattr(cfg, "VERSION", None)
+    _cfg_version = getattr(cfg, "VERSION", None)
 except Exception:
-    base = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
+    base = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
     FIREBASE_JSON_PATH = os.path.join(base, "auth", "serviceAccountKey.json")
     FIREBASE_COLLECTION_NAME = "computadoras"
-    VERSION_AGENTE = None
+    _cfg_version = None
+
+
+def _version_desde_exe_o_config():
+    """En .exe empaquetado, prioriza la versión del PE (Propiedades del archivo); evita drift con config embebido."""
+    if sys.platform == "win32" and getattr(sys, "frozen", False):
+        try:
+            from src.core.exe_version import pe_file_version_string
+
+            v = pe_file_version_string(sys.executable)
+            if v:
+                return v
+        except Exception:
+            pass
+    return _cfg_version
+
+
+VERSION_AGENTE = _version_desde_exe_o_config()
 
 # Inicialización única
 if not firebase_admin._apps:
@@ -142,6 +185,35 @@ if not firebase_admin._apps:
 db = firestore.client()
 
 
+def fallo_actualizacion_agente_remota(uuid_pc, hostname, evento, detalle, contexto=None):
+    """
+    Tras ACTUALIZACION_PROGRAMADA: si falla descarga/reemplazo, deja trazas claras y
+    actualiza tareas/{uuid} a ACTUALIZAR_AGENTE_ERROR con fase + contexto.
+    """
+    hn = hostname or _obtener_hostname()
+    registrar_log_actualizacion(evento, detalle, uuid=uuid_pc, hostname=hn, extra=contexto)
+    if not uuid_pc:
+        return
+    resultado = {
+        "estado": "error",
+        "fase": evento,
+        "mensaje": (detalle or "")[:2000],
+    }
+    ctx = _sanear_contexto(contexto, max_str=500)
+    if ctx:
+        resultado["contexto"] = ctx
+    try:
+        db.collection("tareas").document(uuid_pc).update(
+            {
+                "comando": "ACTUALIZAR_AGENTE_ERROR",
+                "resultado_updates": resultado,
+                "fecha_comando_ejecutado": firestore.SERVER_TIMESTAMP,
+            }
+        )
+    except Exception as e:
+        log_debug(f"fallo_actualizacion_agente_remota (update tareas): {e}")
+
+
 def reportar_post_actualizacion_agente_si_aplica(uuid_pc):
     """
     Tras ACTUALIZAR_AGENTE el proceso termina y el .bat no puede escribir en Firestore.
@@ -157,11 +229,17 @@ def reportar_post_actualizacion_agente_si_aplica(uuid_pc):
         os.remove(path)
     except OSError:
         pass
+    exe = sys.executable if getattr(sys, "frozen", False) else ""
     registrar_log_actualizacion(
         "REEMPLAZO_COMPLETADO",
-        "Servicio en marcha tras ACTUALIZAR_AGENTE: ejecutable reemplazado y servicio reiniciado por el script.",
+        "Servicio en marcha tras ACTUALIZAR_AGENTE: el .bat reemplazó el .exe y reinició el servicio; este arranque ya corre el nuevo binario.",
         uuid=uuid_pc,
         hostname=_obtener_hostname(),
+        extra={
+            "ruta_exe": exe,
+            "version_en_ejecucion": VERSION_AGENTE or "?",
+            "flag_post_update": FLAG_POST_AGENT_UPDATE,
+        },
     )
 
 
@@ -370,25 +448,41 @@ def escuchar_comandos_remotos(uuid_pc, evento_actualizar=None):
         elif comando == "ACTUALIZAR_AGENTE":
             log_debug("Comando recibido: ACTUALIZAR_AGENTE")
             log_centralizado("Info", "Comando", f"Comando recibido: ACTUALIZAR_AGENTE (host {hn})")
+            frozen = getattr(sys, "frozen", False)
             registrar_log_actualizacion(
-                "COMANDO_RECIBIDO",
-                f"ACTUALIZAR_AGENTE recibido (host {hn}, uuid {uuid_pc})",
+                "ACTUALIZAR_AGENTE_RECIBIDO",
+                f"Listener Firestore: comando ACTUALIZAR_AGENTE para tareas/{uuid_pc} (host {hn}).",
                 uuid=uuid_pc,
                 hostname=hn,
+                extra={
+                    "modo_frozen_exe": frozen,
+                    "uuid_tarea": uuid_pc,
+                    "version_en_ejecucion": VERSION_AGENTE or "?",
+                },
             )
             tareas_ref.update({"comando": "DESCARGANDO_AGENTE..."})
             try:
                 doc_agente = db.collection("config").document("agente").get()
                 url = None
-                if doc_agente and doc_agente.exists:
+                cfg_existe = bool(doc_agente and doc_agente.exists)
+                if cfg_existe:
                     cfg = doc_agente.to_dict() or {}
                     url = (cfg.get("url") or "").strip()
                 if url:
+                    pu = urlparse(url)
                     registrar_log_actualizacion(
                         "URL_ENCONTRADA",
-                        f"URL de descarga ({len(url)} caracteres): {url[:120]}",
+                        f"config/agente.url lista: {pu.scheme}://{pu.netloc}{pu.path[:80]}{'…' if len(pu.path) > 80 else ''} ({len(url)} caracteres).",
                         uuid=uuid_pc,
                         hostname=hn,
+                        extra={
+                            "url_completa": url,
+                            "url_host": pu.netloc,
+                            "url_scheme": pu.scheme,
+                            "url_path_preview": (pu.path or "")[:200],
+                            "config_agente_existe": cfg_existe,
+                            "longitud_url": len(url),
+                        },
                     )
                     _url_actualizacion_pendiente_list[0] = url
                     if evento_actualizar is not None:
@@ -403,34 +497,53 @@ def escuchar_comandos_remotos(uuid_pc, evento_actualizar=None):
                     })
                     registrar_log_actualizacion(
                         "ACTUALIZACION_PROGRAMADA",
-                        "El hilo principal descargará el .exe y lanzará el .bat; el siguiente log en consola será REEMPLAZO_INICIADO y luego REEMPLAZO_COMPLETADO al reiniciar.",
+                        "Evento al hilo principal disparado: en breve DESCARGA_* → REEMPLAZO_INICIADO; tras sc start el proceso termina; REEMPLAZO_COMPLETADO solo en el próximo arranque del nuevo .exe.",
                         uuid=uuid_pc,
                         hostname=hn,
+                        extra={
+                            "pasos_siguientes": "GET url → validar tamaño → .bat: ping+sc stop+copy+flag+sc start",
+                            "nota": "Si falla la descarga, tareas pasará a ACTUALIZAR_AGENTE_ERROR con fase y contexto.",
+                        },
                     )
                 else:
                     registrar_log_actualizacion(
-                        "ERROR",
-                        "Falta config/agente con campo url en Firestore",
+                        "CONFIG_AGENTE_SIN_URL",
+                        "config/agente no existe, está vacío o el campo 'url' no tiene valor.",
                         uuid=uuid_pc,
                         hostname=hn,
+                        extra={
+                            "config_agente_existe": cfg_existe,
+                            "url_leida": url or "",
+                        },
                     )
                     tareas_ref.update({
                         "comando": "ACTUALIZAR_AGENTE_ERROR",
-                        "resultado_updates": {"estado": "error", "mensaje": "Falta config/agente con campo url"},
+                        "resultado_updates": {
+                            "estado": "error",
+                            "fase": "CONFIG_AGENTE_SIN_URL",
+                            "mensaje": "Falta URL en config/agente",
+                            "contexto": {"config_agente_existe": cfg_existe},
+                        },
                         "fecha_comando_ejecutado": firestore.SERVER_TIMESTAMP
                     })
             except Exception as e:
                 log_debug(f"Error ACTUALIZAR_AGENTE: {e}")
                 log_centralizado("Error", "Comando", f"Excepción en ACTUALIZAR_AGENTE: {e}", e)
                 registrar_log_actualizacion(
-                    "ERROR",
-                    f"Excepción en ACTUALIZAR_AGENTE: {e}",
+                    "ACTUALIZAR_AGENTE_EXCEPCION",
+                    f"Excepción al leer config/agente o actualizar tareas: {e!s}",
                     uuid=uuid_pc,
                     hostname=hn,
+                    extra={"tipo_excepcion": type(e).__name__},
                 )
                 tareas_ref.update({
                     "comando": "ACTUALIZAR_AGENTE_ERROR",
-                    "resultado_updates": {"estado": "error", "mensaje": str(e)},
+                    "resultado_updates": {
+                        "estado": "error",
+                        "fase": "ACTUALIZAR_AGENTE_EXCEPCION",
+                        "mensaje": str(e)[:2000],
+                        "contexto": {"tipo_excepcion": type(e).__name__},
+                    },
                     "fecha_comando_ejecutado": firestore.SERVER_TIMESTAMP
                 })
 
