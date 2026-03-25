@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Sube dist/AgenteBacar.exe a Firebase Storage y muestra la URL para config/agente.
+Sube dist/AgenteBacar.exe a Firebase Storage y muestra la URL para config/agente_hw (y espejo agente).
 
 Requisitos:
   - auth/serviceAccountKey.json

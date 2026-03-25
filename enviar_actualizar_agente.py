@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Envía el comando ACTUALIZAR_AGENTE a una o todas las PCs en Firebase.
-Cada agente que esté corriendo y escuchando actualizará su .exe desde config/agente.url.
+Cada agente que esté corriendo y escuchando actualizará su .exe desde config/agente_hw.url (o config/agente.url).
 
 Uso:
   python enviar_actualizar_agente.py              # todas las PCs

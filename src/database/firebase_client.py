@@ -10,6 +10,46 @@ from urllib.parse import urlparse
 # Para ACTUALIZAR_AGENTE: el listener escribe aquí la URL y despierta al bucle
 _url_actualizacion_pendiente_list = [None]
 
+# Referencia fuerte al Watch de Firestore (si se pierde, el listener puede cortarse por GC)
+_tareas_snapshot_watch = None
+
+# Firestore: URL de actualización AgenteBacar (doc agente_hw). Legacy: config/agente solo url.
+CONFIG_DOC_AGENTE_HW = "agente_hw"
+CONFIG_DOC_AGENTE_LEGACY = "agente"
+
+
+def _leer_url_y_meta_actualizacion_agente():
+    """
+    Prioridad: config/agente_hw (url + version opcional informativa),
+    luego config/agente (solo url) para agentes antiguos / espejo manual.
+    """
+    doc_hw = db.collection("config").document(CONFIG_DOC_AGENTE_HW).get()
+    doc_legacy = db.collection("config").document(CONFIG_DOC_AGENTE_LEGACY).get()
+    cfg_hw = bool(doc_hw and doc_hw.exists)
+    cfg_legacy = bool(doc_legacy and doc_legacy.exists)
+    url = ""
+    version_publicada = None
+    origen = None
+    if cfg_hw:
+        d = doc_hw.to_dict() or {}
+        url = (d.get("url") or "").strip()
+        vp = (d.get("version") or "").strip()
+        version_publicada = vp if vp else None
+        if url:
+            origen = CONFIG_DOC_AGENTE_HW
+    if not url and cfg_legacy:
+        d = doc_legacy.to_dict() or {}
+        url = (d.get("url") or "").strip()
+        if url:
+            origen = CONFIG_DOC_AGENTE_LEGACY
+    meta = {
+        "origen_config": origen,
+        "version_publicada_config": version_publicada,
+        "config_agente_hw_existe": cfg_hw,
+        "config_agente_legacy_existe": cfg_legacy,
+    }
+    return url, meta
+
 
 def _url_actualizacion_pendiente():
     u = _url_actualizacion_pendiente_list[0]
@@ -54,7 +94,7 @@ def log_centralizado(level, category, message, exception=None):
         doc = {
             "timestamp": firestore.SERVER_TIMESTAMP,
             "level": level,
-            "service": "MiniAgente",
+            "service": "AgenteBacar",
             "machineId": _machine_uuid or "",
             "hostname": _obtener_hostname(),
             "category": category,
@@ -338,6 +378,7 @@ def enviar_datos_pc(datos, forzar_completo=False):
 
 def escuchar_comandos_remotos(uuid_pc, evento_actualizar=None):
     """Listener optimizado para comandos remotos. evento_actualizar: handle para ACTUALIZAR_AGENTE."""
+    global _tareas_snapshot_watch
     tareas_ref = db.collection("tareas").document(uuid_pc)
     try:
         tareas_ref.set({
@@ -349,15 +390,38 @@ def escuchar_comandos_remotos(uuid_pc, evento_actualizar=None):
         log_debug(f"Error en listener: {e}")
         return
 
-    def on_snapshot(doc_snapshot, changes, read_time):
+    def on_snapshot(snapshot_arg, changes, read_time):
+        """
+        google-cloud-firestore llama al callback como (keys, appliedChanges, read_time)
+        donde keys es una lista de DocumentSnapshot (un elemento en watch de documento).
+        El código anterior asumía un solo DocumentSnapshot y fallaba con AttributeError.
+        """
         from src.core.scanner import obtener_datos_pc
-        if not doc_snapshot.exists:
+
+        try:
+            doc_snapshot = snapshot_arg
+            if isinstance(snapshot_arg, (list, tuple)):
+                if not snapshot_arg:
+                    return
+                doc_snapshot = snapshot_arg[0]
+            if not getattr(doc_snapshot, "exists", False):
+                return
+            # Ignorar entregas sin ADDED/MODIFIED (p. ej. solo metadatos). Si changes viene vacío,
+            # igual procesamos el snapshot actual (algunos clientes no rellenan changes).
+            if changes and not any(
+                getattr(getattr(c, "type", None), "name", str(getattr(c, "type", "")))
+                in ("ADDED", "MODIFIED")
+                for c in changes
+            ):
+                return
+            data = doc_snapshot.to_dict() or {}
+        except Exception as e:
+            log_debug(f"on_snapshot(tareas) error: {e}")
+            try:
+                log_centralizado("Error", "Comando", f"Listener tareas/{uuid_pc}: {e}", e)
+            except Exception:
+                pass
             return
-        # Ignorar entregas sin ADDED/MODIFIED (p. ej. solo metadatos). Si changes viene vacío,
-        # igual procesamos el snapshot actual (algunos clientes no rellenan changes).
-        if changes and not any(c.type.name in ("ADDED", "MODIFIED") for c in changes):
-            return
-        data = doc_snapshot.to_dict() or {}
         raw = data.get("comando", "")
         comando = raw.strip() if isinstance(raw, str) else str(raw)
         hn = _obtener_hostname()
@@ -462,17 +526,17 @@ def escuchar_comandos_remotos(uuid_pc, evento_actualizar=None):
             )
             tareas_ref.update({"comando": "DESCARGANDO_AGENTE..."})
             try:
-                doc_agente = db.collection("config").document("agente").get()
-                url = None
-                cfg_existe = bool(doc_agente and doc_agente.exists)
-                if cfg_existe:
-                    cfg = doc_agente.to_dict() or {}
-                    url = (cfg.get("url") or "").strip()
+                url, cfg_meta = _leer_url_y_meta_actualizacion_agente()
+                cfg_existe = bool(
+                    cfg_meta.get("config_agente_hw_existe")
+                    or cfg_meta.get("config_agente_legacy_existe")
+                )
                 if url:
                     pu = urlparse(url)
+                    origen = cfg_meta.get("origen_config") or "?"
                     registrar_log_actualizacion(
                         "URL_ENCONTRADA",
-                        f"config/agente.url lista: {pu.scheme}://{pu.netloc}{pu.path[:80]}{'…' if len(pu.path) > 80 else ''} ({len(url)} caracteres).",
+                        f"URL desde config/{origen}: {pu.scheme}://{pu.netloc}{pu.path[:80]}{'…' if len(pu.path) > 80 else ''} ({len(url)} caracteres).",
                         uuid=uuid_pc,
                         hostname=hn,
                         extra={
@@ -480,7 +544,12 @@ def escuchar_comandos_remotos(uuid_pc, evento_actualizar=None):
                             "url_host": pu.netloc,
                             "url_scheme": pu.scheme,
                             "url_path_preview": (pu.path or "")[:200],
-                            "config_agente_existe": cfg_existe,
+                            "config_documento": origen,
+                            "config_agente_hw_existe": cfg_meta.get("config_agente_hw_existe"),
+                            "config_agente_legacy_existe": cfg_meta.get(
+                                "config_agente_legacy_existe"
+                            ),
+                            "version_publicada_config": cfg_meta.get("version_publicada_config"),
                             "longitud_url": len(url),
                         },
                     )
@@ -508,11 +577,15 @@ def escuchar_comandos_remotos(uuid_pc, evento_actualizar=None):
                 else:
                     registrar_log_actualizacion(
                         "CONFIG_AGENTE_SIN_URL",
-                        "config/agente no existe, está vacío o el campo 'url' no tiene valor.",
+                        "Falta url en config/agente_hw (recomendado) y en config/agente (legacy). "
+                        "Cargá la URL a mano en Firestore o ejecutá set_agente_url.py / workflow con actualizar Firestore.",
                         uuid=uuid_pc,
                         hostname=hn,
                         extra={
-                            "config_agente_existe": cfg_existe,
+                            "config_agente_hw_existe": cfg_meta.get("config_agente_hw_existe"),
+                            "config_agente_legacy_existe": cfg_meta.get(
+                                "config_agente_legacy_existe"
+                            ),
                             "url_leida": url or "",
                         },
                     )
@@ -521,8 +594,13 @@ def escuchar_comandos_remotos(uuid_pc, evento_actualizar=None):
                         "resultado_updates": {
                             "estado": "error",
                             "fase": "CONFIG_AGENTE_SIN_URL",
-                            "mensaje": "Falta URL en config/agente",
-                            "contexto": {"config_agente_existe": cfg_existe},
+                            "mensaje": "Falta URL en config/agente_hw o config/agente",
+                            "contexto": {
+                                "agente_hw_existe": cfg_meta.get("config_agente_hw_existe"),
+                                "agente_legacy_existe": cfg_meta.get(
+                                    "config_agente_legacy_existe"
+                                ),
+                            },
                         },
                         "fecha_comando_ejecutado": firestore.SERVER_TIMESTAMP
                     })
@@ -531,7 +609,7 @@ def escuchar_comandos_remotos(uuid_pc, evento_actualizar=None):
                 log_centralizado("Error", "Comando", f"Excepción en ACTUALIZAR_AGENTE: {e}", e)
                 registrar_log_actualizacion(
                     "ACTUALIZAR_AGENTE_EXCEPCION",
-                    f"Excepción al leer config/agente o actualizar tareas: {e!s}",
+                    f"Excepción al leer config/agente_hw|agente o actualizar tareas: {e!s}",
                     uuid=uuid_pc,
                     hostname=hn,
                     extra={"tipo_excepcion": type(e).__name__},
@@ -547,7 +625,7 @@ def escuchar_comandos_remotos(uuid_pc, evento_actualizar=None):
                     "fecha_comando_ejecutado": firestore.SERVER_TIMESTAMP
                 })
 
-    tareas_ref.on_snapshot(on_snapshot)
+    _tareas_snapshot_watch = tareas_ref.on_snapshot(on_snapshot)
 
 
 def _doc_to_dict(doc):
@@ -596,13 +674,22 @@ def exportar_estado_firestore():
     return estado
 
 
-def configurar_url_actualizacion_agente(url):
+def configurar_url_actualizacion_agente(url, version=None):
     """
-    Crea o actualiza el documento config/agente con el campo 'url'.
-    Esa URL es la que usa el comando ACTUALIZAR_AGENTE para descargar la nueva versión.
+    Escribe config/agente_hw (AgenteBacar): url obligatoria, version opcional (informativa en consola).
+    Duplica url en config/agente para compatibilidad con despliegues que solo lean el doc legacy.
     """
     url = (url or "").strip()
     if not url:
         raise ValueError("La URL no puede estar vacía")
-    db.collection("config").document("agente").set({"url": url}, merge=True)
-    log_debug(f"Config/agente actualizado con url: {url[:50]}...")
+    data_hw = {"url": url}
+    if version is not None:
+        v = str(version).strip().lstrip("v")
+        if v:
+            data_hw["version"] = v
+    db.collection("config").document(CONFIG_DOC_AGENTE_HW).set(data_hw, merge=True)
+    db.collection("config").document(CONFIG_DOC_AGENTE_LEGACY).set({"url": url}, merge=True)
+    log_debug(
+        f"Config/{CONFIG_DOC_AGENTE_HW} (+ legacy agente) url={url[:50]}..."
+        + (f" version={data_hw.get('version')}" if data_hw.get("version") else "")
+    )

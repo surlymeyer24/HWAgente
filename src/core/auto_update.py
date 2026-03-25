@@ -2,7 +2,7 @@
 Actualización del agente por comando desde Firebase.
 
 No busca actualizaciones solo. Tú disparas la actualización:
-  1. En Firestore: config/agente con campo "url" (URL pública del .exe).
+  1. En Firestore: config/agente_hw con campo "url" (prioridad); fallback config/agente.
   2. En tareas/{uuid}: comando = "ACTUALIZAR_AGENTE".
 
 El agente descarga ese .exe, se reemplaza y reinicia el servicio.

@@ -103,7 +103,7 @@ if RUNNING_AS_SERVICE:
                 
                 datos = obtener_datos_pc()
                 set_machine_uuid(datos.get("uuid"))
-                log_centralizado("Info", "Servicio", "MiniAgente iniciado")
+                log_centralizado("Info", "Servicio", "AgenteBacar iniciado")
                 reportar_post_actualizacion_agente_si_aplica(datos.get("uuid"))
                 enviar_datos_pc(datos)
                 # Evento para despertar el bucle cuando Firebase envíe ACTUALIZAR_AGENTE
@@ -123,8 +123,29 @@ if RUNNING_AS_SERVICE:
                         rc = win32event.WaitForSingleObject(self.hWaitStop, 300000)
                     if rc == win32event.WAIT_OBJECT_0:
                         break
-                    if (h_update is not None and rc == win32event.WAIT_OBJECT_0 + 1
-                            and getattr(sys, 'frozen', False)):
+                    # PyInstaller: frozen y/o _MEIPASS; sin esto el .exe podría no disparar la descarga
+                    _exe_empaquetado = getattr(sys, "frozen", False) or getattr(
+                        sys, "_MEIPASS", None
+                    ) is not None
+                    if h_update is not None and rc == win32event.WAIT_OBJECT_0 + 1 and not _exe_empaquetado:
+                        try:
+                            from src.database.firebase_client import (
+                                _url_actualizacion_pendiente,
+                                log_debug,
+                            )
+                            log_debug(
+                                "ACTUALIZAR_AGENTE: evento Win32 recibido pero el proceso no es ejecutable "
+                                "empaquetado (sin frozen/_MEIPASS); se descarta URL pendiente."
+                            )
+                            _url_actualizacion_pendiente()
+                        except Exception:
+                            pass
+                        continue
+                    if (
+                        h_update is not None
+                        and rc == win32event.WAIT_OBJECT_0 + 1
+                        and _exe_empaquetado
+                    ):
                         try:
                             from src.database.firebase_client import (
                                 _url_actualizacion_pendiente,

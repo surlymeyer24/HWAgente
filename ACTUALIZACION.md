@@ -29,9 +29,16 @@ El `.exe` queda en **`dist\AgenteBacar.exe`**.
 
 ## 2. Subir el exe a tu servidor (Firebase Storage, etc.) y tener la URL del .exe.
 
-## 3. Actualizar la URL en Firebase:
+## 3. Actualizar la URL en Firebase (AgenteBacar)
 
+Documento **`config/agente_hw`** (`url` obligatoria; `version` opcional). Se espeja `url` en **`config/agente`** para compatibilidad.
+
+```bat
 python set_agente_url.py "https://tu-url/AgenteBacar.exe"
+python set_agente_url.py "https://tu-url/AgenteBacar.exe" "2.4.0"
+```
+
+Si usás **GitHub Actions**, podés dejar que el job opcional actualice Firestore (`actualizar_firestore: si`) o poner **no** y hacer este paso a mano.
 
 ## 4. En la máquina desplegada — reemplazar manualmente el exe:
 

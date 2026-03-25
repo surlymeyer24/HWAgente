@@ -20,6 +20,13 @@ on:
         description: 'Versión del release (obligatorio). Ej. v2.3.0 — se escribe en config y en el .exe. No dejes vacío.'
         required: true
         default: ''
+      actualizar_firestore:
+        description: 'Tras el release, actualizar config/agente_hw (+ espejo agente) con la URL del .exe. Desactivá si cargás la URL a mano.'
+        type: choice
+        options:
+          - 'si'
+          - 'no'
+        default: 'si'
 
 concurrency:
   group: build-and-deploy
@@ -112,12 +119,13 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  # Job separado en Ubuntu para evitar problemas de crypto en Windows
+  # Job opcional: Ubuntu evita problemas de crypto en Windows. Podés usar solo "no" y set_agente_url.py a mano.
   update-firestore:
+    if: ${{ github.event.inputs.actualizar_firestore == 'si' }}
     runs-on: ubuntu-latest
     needs: build-and-deploy
     steps:
-      - name: Update Firestore config/agente.url
+      - name: Update Firestore config/agente_hw (+ espejo agente)
         env:
           VERSION: ${{ github.event.inputs.version }}
           GITHUB_REPOSITORY: ${{ github.repository }}
@@ -131,13 +139,16 @@ jobs:
           s = os.environ.get("FIREBASE_SERVICE_ACCOUNT_B64", "").strip().replace("\n","").replace("\r","").replace(" ","")
           sa = json.loads(base64.b64decode(s).decode("utf-8"))
 
-          version = os.environ.get("VERSION", "v1.0.0")
-          repo    = os.environ.get("GITHUB_REPOSITORY", "")
-          url = f"https://github.com/{repo}/releases/download/{version}/AgenteBacar.exe"
+          version_tag = os.environ.get("VERSION", "").strip()
+          version_plain = version_tag.lstrip("v") if version_tag else ""
+          repo = os.environ.get("GITHUB_REPOSITORY", "")
+          url = f"https://github.com/{repo}/releases/download/{version_tag}/AgenteBacar.exe"
 
           cred = credentials.Certificate(sa)
           firebase_admin.initialize_app(cred)
           db = firestore.client()
+          data_hw = {"url": url, "version": version_plain}
+          db.collection("config").document("agente_hw").set(data_hw, merge=True)
           db.collection("config").document("agente").set({"url": url}, merge=True)
-          print("Firestore actualizado →", url)
+          print("Firestore config/agente_hw (+ agente url espejo) →", url, "| version=", version_plain)
           PYEOF

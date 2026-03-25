@@ -66,7 +66,7 @@ Los comandos se envían desde el frontend escribiendo en el documento `tareas/{u
 ### Auto-actualización
 
 1. El frontend escribe `ACTUALIZAR_AGENTE` en Firestore
-2. El agente lee la URL del ejecutable desde `config/agente.url`
+2. **AgenteBacar** lee la URL desde **`config/agente_hw.url`**; si no hay, usa **`config/agente.url`** (legacy). El campo **`version`** en `agente_hw` es **opcional** (informativo; el .exe no lo usa para descargar).
 3. Descarga el nuevo `.exe` (validación: > 100 KB)
 4. Crea un `.bat` que detiene el servicio, reemplaza el archivo y lo reinicia
 5. El batch se ejecuta de forma desatachada y se autoeliminа
@@ -123,7 +123,8 @@ El script **une** `computadoras` y `tareas` por UUID. Si **`version_agente`** co
 - **Colecciones usadas**:
   - `computadoras` — datos de cada PC (ID = UUID del motherboard)
   - `tareas` — comandos remotos por UUID
-  - `config/agente` — URL del ejecutable para actualizaciones
+  - `config/agente_hw` — URL del `.exe` para **ACTUALIZAR_AGENTE** (y opcionalmente `version` sin `v`, informativa)
+  - `config/agente` — espejo opcional de solo `url` (compatibilidad; `set_agente_url` y el workflow lo mantienen al actualizar)
   - `logs_actualizaciones` — historial de comandos y del flujo **ACTUALIZAR_AGENTE**; cada documento tiene `evento`, `detalle` y opcionalmente **`contexto`** (mapa: URL, host, HTTP, bytes, SHA256, rutas, fase del error, etc.). Eventos típicos de actualización: `ACTUALIZAR_AGENTE_RECIBIDO`, `URL_ENCONTRADA`, `ACTUALIZACION_PROGRAMADA`, `DESCARGA_*`, `REEMPLAZO_*`, `CONFIG_AGENTE_SIN_URL`, `ACTUALIZAR_AGENTE_ERROR` (también reflejado en `tareas.resultado_updates` con `fase` y `contexto`).
 
 ---
@@ -207,7 +208,7 @@ gh workflow run build-and-deploy.yml --field version=v2.5.0
 
 El workflow tiene dos jobs:
 1. `build-and-deploy` (`windows-latest`): compila con PyInstaller y publica el `.exe` como GitHub Release
-2. `update-firestore` (`ubuntu-latest`): actualiza la URL en Firestore (`config/agente.url`) para que los agentes existentes puedan auto-actualizarse (job separado para evitar problemas de crypto en Windows)
+2. `update-firestore` (`ubuntu-latest`, **opcional** con input `actualizar_firestore`): escribe `config/agente_hw` (`url` + `version`) y espeja `url` en `config/agente`. Si elegís **no**, cargá la URL con `python set_agente_url.py "https://..."` o a mano en la consola Firebase.
 
 **Secret requerido:** `FIREBASE_SERVICE_ACCOUNT_B64` — el `serviceAccountKey.json` codificado en base64.
 

@@ -53,7 +53,7 @@ Ya usás Firebase. Podés subir el `.exe` a **Firebase Storage** del mismo proye
      ```
    El nombre del bucket lo ves en Storage → pestaña “Files” arriba (ej. `minagente-xxxxx.appspot.com`).
 
-6. **Configurá esa URL en Firebase** (documento `config/agente`):
+6. **Configurá esa URL en Firebase** (documento **`config/agente_hw`**, campo `url`; opcional `version`. Se puede espejar en `config/agente`):
    ```bash
    python set_agente_url.py "https://firebasestorage.googleapis.com/v0/b/TU_PROYECTO.appspot.com/o/agente%2FAgenteBacar.exe?alt=media"
    ```
@@ -98,7 +98,7 @@ python set_agente_url.py "TU_URL_AQUI"
 
 ## Cómo ejecutar el nuevo .exe en las máquinas
 
-El agente **no** ejecuta el nuevo .exe por sí solo: vos disparás la actualización desde Firebase. En cada PC el agente está escuchando el documento **tareas/{uuid}**. Cuando ve el comando **ACTUALIZAR_AGENTE**, descarga el .exe desde **config/agente.url**, se reemplaza y reinicia el servicio. Así el nuevo .exe queda corriendo.
+El agente **no** ejecuta el nuevo .exe por sí solo: vos disparás la actualización desde Firebase. En cada PC el agente está escuchando el documento **tareas/{uuid}**. Cuando ve el comando **ACTUALIZAR_AGENTE**, descarga el .exe desde **config/agente_hw.url** (o **config/agente.url** si no hay HW), se reemplaza y reinicia el servicio. Así el nuevo .exe queda corriendo.
 
 ### Opción A: Script (recomendado)
 
@@ -126,7 +126,7 @@ Para cada PC que quieras actualizar repetí con su documento en **tareas** (un d
 ### Qué pasa en cada máquina
 
 1. El agente (servicio **AgenteMonitoreo**) recibe el comando.
-2. Lee la URL de **config/agente**.
+2. Lee la URL de **config/agente_hw** (prioridad) o **config/agente**.
 3. Descarga el .exe en la misma carpeta como `AgenteBacar_new.exe`.
 4. Crea un .bat que: espera unos segundos, para el servicio, reemplaza el .exe, inicia el servicio de nuevo y se borra.
 5. El proceso actual termina; el .bat hace el reemplazo y arranca el nuevo .exe. En esa PC ya queda corriendo la nueva versión.
