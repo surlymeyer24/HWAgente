@@ -71,6 +71,19 @@ Los comandos se envían desde el frontend escribiendo en el documento `tareas/{u
 4. Crea un `.bat` que detiene el servicio, reemplaza el archivo y lo reinicia
 5. El batch se ejecuta de forma desatachada y se autoeliminа
 
+### Consultar versión en PCs remotas (desde CMD)
+
+Cada PC reporta **`version_agente`** en Firestore (`computadoras/{uuid}`). Desde una máquina con Python, credenciales (`auth/serviceAccountKey.json`) y el clon del repo podés listar hostname, versión y último comando sin entrar por RDP:
+
+| Forma | Ejemplo |
+|-------|---------|
+| **CMD / PowerShell** | `verificar_version.bat` (equivalente a `python verificar_actualizaciones.py`) |
+| Filtrar por hostname | `verificar_version.bat --host OFICINA01` (coincidencia parcial, sin distinguir mayúsculas) |
+| Salida JSON | `verificar_version.bat --json` (útil para scripts) |
+| Ayuda | `python verificar_actualizaciones.py -h` |
+
+El script une datos de `computadoras` y `tareas` para ver si hubo `ACTUALIZACION_PROGRAMADA`, errores de actualización, etc.
+
 ---
 
 ## Sincronización con Firebase
@@ -90,6 +103,8 @@ Los comandos se envían desde el frontend escribiendo en el documento `tareas/{u
 ```
 MiniAgente/
 ├── main.py                      # Entry point, lógica del servicio Windows
+├── verificar_actualizaciones.py # Lista version_agente y último comando por PC (Firebase)
+├── verificar_version.bat        # Atajo CMD para el script anterior
 ├── config/
 │   └── config.py                # Versión, rutas, modo debug
 ├── src/

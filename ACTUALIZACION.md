@@ -17,8 +17,32 @@ sc stop AgenteMonitoreo
 :: Copiar el nuevo AgenteBacar.exe reemplazando el viejo
 sc start AgenteMonitoreo
 
-## 5. Verificar que levantó con la nueva versión:
+## 5. Verificar que levantó con la nueva versión
 
+Lee **`version_agente`** y el último comando en cada PC desde Firestore (no hace falta RDP en cada máquina).
 
+**Desde CMD** (en la carpeta del proyecto, con Python en PATH y `auth/serviceAccountKey.json`):
+
+```bat
+verificar_version.bat
+```
+
+Equivalente:
+
+```bat
 python verificar_actualizaciones.py
-Deberías ver version_agente: 2.1.0.
+```
+
+**Solo una PC** (el hostname contiene el texto, sin distinguir mayúsculas):
+
+```bat
+verificar_version.bat --host OFICINA01
+```
+
+**Salida JSON** (para otro script):
+
+```bat
+verificar_version.bat --json
+```
+
+Deberías ver `version_agente` alineado con la versión que desplegaste (por ejemplo `2.1.0` si ese era el build). Si mandaste `ACTUALIZAR_AGENTE`, revisá también el último comando (`ACTUALIZACION_PROGRAMADA`, `ACTUALIZAR_AGENTE_ERROR`, etc.).

@@ -137,10 +137,12 @@ Para cada PC que quieras actualizar repetí con su documento en **tareas** (un d
    Cada PC envía su versión en el documento **computadoras/{uuid}** (campo **version_agente**). Si en **config** tenés `VERSION = "2.0.1"`, después de mandar ACTUALIZAR_AGENTE las PCs que ya se actualizaron reportarán **version_agente: 2.0.1** en la próxima sincronización (1–2 minutos).
 
 2. **Script de verificación**  
-   Ejecutá:
+   Ejecutá (desde la carpeta del proyecto, con Python y `auth/serviceAccountKey.json`):
    ```bash
    python verificar_actualizaciones.py
    ```
+   En Windows CMD podés usar el atajo **`verificar_version.bat`** (mismos argumentos). Opciones útiles: **`--host TEXTO`** (filtrar por hostname), **`--json`** (salida JSON), **`-h`** (ayuda).
+
    Mostrará por cada PC: hostname, **version_agente** y el **último comando** en **tareas**:
    - **ACTUALIZACION_PROGRAMADA**: recibió la orden y programó la actualización.
    - **ACTUALIZAR_AGENTE_ERROR**: falló (revisar el documento en Firestore).
