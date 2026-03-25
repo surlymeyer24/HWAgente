@@ -149,3 +149,14 @@ dotnet publish CyberWatch.Service/CyberWatch.Service.csproj -c Release -r win-x6
 **Nota:** `appsettings.json` se copia automáticamente por `CopyToOutputDirectory` del `.csproj`.
 `serviceAccountKey.json` no está en el `.csproj`, se copia manualmente.
 `install.bat` se copia por el target `CopiarInstaller` del Service `.csproj`.
+
+---
+
+## Verificar documentación antes de implementar
+
+Antes de realizar cualquier cambio técnico (código, configuración, comandos, dependencias, etc.):
+
+1. Buscar la documentación más reciente disponible sobre la tecnología o API involucrada.
+2. Implementar **solo** si hay certeza de que funcionará con las versiones actuales del proyecto.
+
+**Por qué:** Evita introducir código obsoleto o con APIs deprecadas que pasen los tests locales pero fallen en producción.

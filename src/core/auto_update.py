@@ -38,6 +38,11 @@ def download_and_apply_update(url, uuid=None, hostname=None):
 
     _log("DESCARGA_INICIADA", f"Descargando desde: {url[:80]}")
     try:
+        from src.database.firebase_client import log_centralizado
+        log_centralizado("Info", "Update", f"Descargando actualización… ({url[:80]})")
+    except Exception:
+        pass
+    try:
         import requests
         r = requests.get(url, timeout=120, stream=True)
         r.raise_for_status()
@@ -64,15 +69,19 @@ def download_and_apply_update(url, uuid=None, hostname=None):
             pass
         return False
 
-    _log("DESCARGA_EXITOSA", f"Archivo descargado: {os.path.getsize(nuevo_exe)} bytes")
+    _log("DESCARGA_EXITOSA", f"Archivo descargado: {os.path.getsize(nuevo_exe)} bytes en {nuevo_exe}")
 
-    # Batch: esperar, parar servicio, copiar exe, arrancar servicio
+    from src.database.firebase_client import FLAG_POST_AGENT_UPDATE
+
+    flag_path = os.path.join(carpeta, FLAG_POST_AGENT_UPDATE)
+    # Batch: esperar, parar servicio, copiar exe, marcar éxito para el próximo arranque, arrancar servicio
     bat_lines = [
         "@echo off",
         "ping 127.0.0.1 -n 6 > nul",
         f'sc stop "{SERVICIO_NOMBRE}"',
         "timeout /t 3 /nobreak > nul",
         f'copy /Y "{nuevo_exe}" "{exe_actual}"',
+        f'if not errorlevel 1 type nul > "{flag_path}"',
         f'sc start "{SERVICIO_NOMBRE}"',
         f'del /F /Q "{nuevo_exe}"',
         "del /F /Q \"%~f0\"",
@@ -101,7 +110,11 @@ def download_and_apply_update(url, uuid=None, hostname=None):
             close_fds=True,
             cwd=os.path.dirname(bat_path),
         )
-        _log("REEMPLAZO_INICIADO", "Script de reemplazo lanzado; el servicio se reiniciará")
+        _log(
+            "REEMPLAZO_INICIADO",
+            "Script .bat desacoplado (para servicio, copy, sc start). El proceso Python termina aquí; "
+            "no puede escribir más en Firestore hasta el reinicio. Tras sc start, el nuevo agente registrará REEMPLAZO_COMPLETADO.",
+        )
     except Exception as e:
         _log("ERROR", f"Error lanzando script de instalación: {e}")
         try:

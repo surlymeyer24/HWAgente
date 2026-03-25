@@ -87,7 +87,14 @@ if RUNNING_AS_SERVICE:
             
             try:
                 # Importaciones tardías para no demorar el arranque 
-                from src.database.firebase_client import enviar_datos_pc, escuchar_comandos_remotos, log_debug
+                from src.database.firebase_client import (
+                    enviar_datos_pc,
+                    escuchar_comandos_remotos,
+                    log_centralizado,
+                    log_debug,
+                    reportar_post_actualizacion_agente_si_aplica,
+                    set_machine_uuid,
+                )
                 from src.core.scanner import obtener_datos_pc
                 
                 # AVISAR QUE YA ESTÁ CORRIENDO
@@ -95,6 +102,9 @@ if RUNNING_AS_SERVICE:
                 log_debug("Servicio en estado RUNNING.")
                 
                 datos = obtener_datos_pc()
+                set_machine_uuid(datos.get("uuid"))
+                log_centralizado("Info", "Servicio", "MiniAgente iniciado")
+                reportar_post_actualizacion_agente_si_aplica(datos.get("uuid"))
                 enviar_datos_pc(datos)
                 # Evento para despertar el bucle cuando Firebase envíe ACTUALIZAR_AGENTE
                 try:
@@ -122,7 +132,11 @@ if RUNNING_AS_SERVICE:
                             )
                             from src.core.auto_update import download_and_apply_update
                             url = _url_actualizacion_pendiente()
-                            if url and download_and_apply_update(url, uuid=datos.get('uuid')):
+                            if url and download_and_apply_update(
+                                url,
+                                uuid=datos.get("uuid"),
+                                hostname=datos.get("hostname"),
+                            ):
                                 log_debug("Actualizacion programada; reinicio en breve.")
                                 self.running = False
                                 break
@@ -136,8 +150,9 @@ if RUNNING_AS_SERVICE:
                     enviar_datos_pc(obtener_datos_pc())
                     
             except Exception as e:
-                from src.database.firebase_client import log_debug
+                from src.database.firebase_client import log_centralizado, log_debug
                 log_debug(f"Error general en SvcDoRun: {e}")
+                log_centralizado("Error", "Servicio", f"Error general en SvcDoRun: {e}", e)
 
 # --- 5. PUNTO DE ENTRADA PRINCIPAL ---
 if __name__ == "__main__":
