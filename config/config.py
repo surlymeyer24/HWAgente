@@ -13,5 +13,5 @@ BASE_DIR = get_base_path()
 # Rutas absolutas garantizadas
 FIREBASE_JSON_PATH = os.path.join(BASE_DIR, "auth", "serviceAccountKey.json")
 FIREBASE_COLLECTION_NAME = "computadoras"
-VERSION = "3.9.0"
+VERSION = "4.2.0"
 DEBUG_MODE = False
