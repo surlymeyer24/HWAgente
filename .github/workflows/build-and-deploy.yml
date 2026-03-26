@@ -106,6 +106,7 @@ jobs:
           PYEOF
 
       - name: Commit version bump back to repo
+        continue-on-error: true
         shell: bash
         env:
           VERSION: ${{ github.event.inputs.version }}
@@ -115,6 +116,7 @@ jobs:
           git add config/config.py
           git diff --cached --quiet && echo "Sin cambios en config.py" && exit 0
           git commit -m "Bump VERSION to ${VERSION}"
+          git pull --rebase origin main
           git push origin HEAD:main
 
       - name: Build AgenteBacar.exe
