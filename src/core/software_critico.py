@@ -10,6 +10,7 @@ def _ejecutar_powershell(script, timeout=20):
             ['powershell', '-NoProfile', '-Command', script],
             capture_output=True,
             text=True,
+            encoding='utf-8', errors='replace',
             timeout=timeout,
             creationflags=subprocess.CREATE_NO_WINDOW
         )

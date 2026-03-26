@@ -39,6 +39,7 @@ def obtener_monitores():
             ['powershell', '-NoProfile', '-Command', ps_script],
             capture_output=True,
             text=True,
+            encoding='utf-8', errors='replace',
             timeout=10,
             creationflags=subprocess.CREATE_NO_WINDOW
         )
@@ -121,6 +122,7 @@ def obtener_resoluciones_monitores():
             ['powershell', '-NoProfile', '-Command', ps_script],
             capture_output=True,
             text=True,
+            encoding='utf-8', errors='replace',
             timeout=5,
             creationflags=subprocess.CREATE_NO_WINDOW
         )
@@ -173,6 +175,7 @@ def obtener_impresoras():
             ['powershell', '-NoProfile', '-Command', ps_script],
             capture_output=True,
             text=True,
+            encoding='utf-8', errors='replace',
             timeout=10,
             creationflags=subprocess.CREATE_NO_WINDOW
         )
@@ -328,6 +331,7 @@ def obtener_dispositivos_usb():
             ['powershell', '-NoProfile', '-Command', ps_script],
             capture_output=True,
             text=True,
+            encoding='utf-8', errors='replace',
             timeout=10,
             creationflags=subprocess.CREATE_NO_WINDOW
         )
@@ -494,6 +498,7 @@ def obtener_dispositivos_audio():
             ['powershell', '-NoProfile', '-Command', ps_entrada],
             capture_output=True,
             text=True,
+            encoding='utf-8', errors='replace',
             timeout=8,
             creationflags=subprocess.CREATE_NO_WINDOW
         )

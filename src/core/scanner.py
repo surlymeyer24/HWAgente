@@ -91,6 +91,7 @@ def obtener_modelos_discos_fisicos():
             ['wmic', 'diskdrive', 'get', 'Index,Model'],
             capture_output=True,
             text=True,
+            encoding='utf-8', errors='replace',
             timeout=10,
             creationflags=subprocess.CREATE_NO_WINDOW
         )
@@ -121,6 +122,7 @@ def obtener_disco_de_particion(letra_unidad):
             ['wmic', 'logicaldisk', 'where', f'DeviceID="{letra}:"', 'assoc', '/assocclass:Win32_LogicalDiskToPartition'],
             capture_output=True,
             text=True,
+            encoding='utf-8', errors='replace',
             timeout=10,
             creationflags=subprocess.CREATE_NO_WINDOW
         )
@@ -279,6 +281,7 @@ def obtener_estado_servicios():
                 ['sc', 'query', servicio],
                 capture_output=True,
                 text=True,
+                encoding='utf-8', errors='replace',
                 timeout=5,
                 creationflags=subprocess.CREATE_NO_WINDOW
             )
@@ -330,6 +333,7 @@ def obtener_id_anydesk():
             [anydesk_exe, '--get-id'],
             capture_output=True,
             text=True,
+            encoding='utf-8', errors='replace',
             timeout=5,
             creationflags=subprocess.CREATE_NO_WINDOW
         )
@@ -418,6 +422,7 @@ def obtener_aplicaciones_activas():
             ['powershell', '-NoProfile', '-Command', powershell_script],
             capture_output=True,
             text=True,
+            encoding='utf-8', errors='replace',
             timeout=10,  # REDUCIDO DE 15 A 10
             creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
         )
@@ -543,7 +548,7 @@ def obtener_usuarios():
 def obtener_id_inventario():
     try:
         cmd = 'wmic csproduct get uuid'
-        resultado = subprocess.check_output(cmd, shell=True).decode().split('\n')
+        resultado = subprocess.check_output(cmd, shell=True).decode('utf-8', errors='replace').split('\n')
         uuid = resultado[1].strip()
         return uuid
     except Exception as e:

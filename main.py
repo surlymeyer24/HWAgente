@@ -8,8 +8,8 @@ import os
 from config.config import DEBUG_MODE
 if getattr(sys, 'frozen', False) and not DEBUG_MODE:
     sys.stdin = None
-    sys.stdout = open(os.devnull, 'w')
-    sys.stderr = open(os.devnull, 'w')
+    sys.stdout = open(os.devnull, 'w', encoding='utf-8')
+    sys.stderr = open(os.devnull, 'w', encoding='utf-8')
 
 # --- 2. DETECCIÓN DE MÓDULOS DE SERVICIO ---
 try:
@@ -40,8 +40,9 @@ def solicitar_permisos_admin():
 
 def servicio_esta_instalado():
     try:
-        res = subprocess.run('sc query "AgenteMonitoreo"', 
-                             shell=True, capture_output=True, text=True, 
+        res = subprocess.run('sc query "AgenteMonitoreo"',
+                             shell=True, capture_output=True, text=True,
+                             encoding='utf-8', errors='replace',
                              creationflags=subprocess.CREATE_NO_WINDOW)
         return "AgenteMonitoreo" in res.stdout
     except: 
@@ -56,7 +57,8 @@ def instalar_servicio_automaticamente():
                    creationflags=subprocess.CREATE_NO_WINDOW)
     
     cmd = f'sc create "AgenteMonitoreo" binPath= "{exe_path}" start= auto DisplayName= "Agente de Monitoreo IT"'
-    res = subprocess.run(cmd, shell=True, capture_output=True, text=True, 
+    res = subprocess.run(cmd, shell=True, capture_output=True, text=True,
+                        encoding='utf-8', errors='replace',
                         creationflags=subprocess.CREATE_NO_WINDOW)
     
     if "SUCCESS" in res.stdout or "CORRECTO" in res.stdout:
