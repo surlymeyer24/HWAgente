@@ -24,6 +24,7 @@ __pycache__/
 # === EDITORES / IDEs ===
 .vscode/
 .idea/
+.cursor/
 .DS_Store
 
 # === EXPORTACIONES / DUMPS ===

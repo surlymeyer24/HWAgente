@@ -77,12 +77,44 @@ def inicializar_cache():
             'procesador': platform.processor(),
             'nucleos_fisicos': psutil.cpu_count(logical=False),
             'ram_total_gb': round(psutil.virtual_memory().total / (1024 ** 3), 2),
-            'modelos_discos': obtener_modelos_discos_fisicos()  # Cacheamos modelos
+            'modelos_discos': obtener_modelos_discos_fisicos(),  # Cacheamos modelos
+            'tipos_discos': obtener_tipos_discos_fisicos()  # SSD / HDD
         }
     return _CACHE_ESTATICO
 
 
 # ==================== 1. SALUD DEL DISCO ====================
+def obtener_tipos_discos_fisicos():
+    """Obtiene el tipo de cada disco físico (SSD/HDD) usando Get-PhysicalDisk"""
+    tipos = {}
+    try:
+        resultado = subprocess.run(
+            ['powershell', '-Command',
+             'Get-PhysicalDisk | Select-Object DeviceId, MediaType | ConvertTo-Json'],
+            capture_output=True,
+            text=True,
+            encoding='utf-8', errors='replace',
+            timeout=10,
+            creationflags=subprocess.CREATE_NO_WINDOW
+        )
+
+        import json
+        data = json.loads(resultado.stdout.strip())
+        if isinstance(data, dict):
+            data = [data]
+        for disco in data:
+            device_id = str(disco.get('DeviceId', '')).strip()
+            media_type = str(disco.get('MediaType', '')).strip()
+            if media_type in ('SSD', 'HDD'):
+                tipos[device_id] = media_type
+            else:
+                tipos[device_id] = 'Desconocido'
+    except Exception as e:
+        print(f"⚠️ No se pudo obtener tipos de discos: {e}")
+
+    return tipos
+
+
 def obtener_modelos_discos_fisicos():
     """Obtiene los modelos de los discos físicos usando WMIC (se ejecuta 1 vez)"""
     modelos = {}
@@ -147,23 +179,26 @@ def obtener_salud_discos():
     """Obtiene información de espacio en disco usando caché de modelos"""
     cache = inicializar_cache()
     modelos_discos = cache['modelos_discos']
-    
+    tipos_discos = cache['tipos_discos']
+
     discos = []
     for partition in psutil.disk_partitions():
         if 'fixed' not in partition.opts:
             continue
-            
+
         try:
             uso = psutil.disk_usage(partition.mountpoint)
-            
+
             letra = partition.device
             disco_index = obtener_disco_de_particion(letra)
             modelo = modelos_discos.get(disco_index, "Desconocido") if disco_index else "Desconocido"
-            
+            tipo = tipos_discos.get(disco_index, "Desconocido") if disco_index else "Desconocido"
+
             discos.append({
                 "dispositivo": partition.device,
                 "punto_montaje": partition.mountpoint,
                 "modelo_disco": modelo,
+                "tipo_disco": tipo,
                 "total_gb": round(uso.total / (1024 ** 3), 2),
                 "usado_gb": round(uso.used / (1024 ** 3), 2),
                 "libre_gb": round(uso.free / (1024 ** 3), 2),
