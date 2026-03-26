@@ -1,0 +1,13 @@
+---
+description: Consultar docs actualizadas antes de cambios técnicos
+alwaysApply: true
+---
+
+# Documentación antes de implementar
+
+Antes de cambios técnicos (código, configuración, comandos, dependencias):
+
+1. Buscar la documentación más reciente de la tecnología o API involucrada.
+2. Implementar **solo** si hay certeza de compatibilidad con las versiones actuales del proyecto.
+
+Objetivo: evitar APIs obsoletas o deprecadas que pasen en local y fallen en producción.

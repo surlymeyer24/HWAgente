@@ -1,0 +1,21 @@
+---
+description: Leer README al inicio; mantenerlo alineado con cambios significativos
+alwaysApply: true
+---
+
+# README.md en la raíz del repo
+
+## Al comenzar una tarea
+
+Leer `README.md` para contexto: arquitectura, estado, bugs abiertos y pendientes. Antes de proponer cambios, comprobar si el README cubre el componente o área a tocar.
+
+## Tras cambios significativos
+
+Actualizar `README.md` cuando haya feature nueva, fix importante, cambio arquitectónico o pendiente resuelto:
+
+- Bug resuelto → quitar o marcar en "Bugs abiertos".
+- Nueva funcionalidad → añadir en la sección que corresponda.
+- Pendiente hecho → quitar de "Refactoring pendiente".
+- Paths, nombres o comportamiento → tablas y descripciones al día.
+
+El README es la fuente de verdad del estado del proyecto: si cambió el código, el README debe reflejarlo.

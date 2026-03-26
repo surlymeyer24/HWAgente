@@ -234,6 +234,168 @@ _CATEGORIAS_USB = {
     'Net': 'Adaptador de red USB',
 }
 
+# Diccionario de Vendor IDs USB → nombre del fabricante
+# Fuente: USB-IF (USB Implementers Forum) — marcas más comunes en entornos corporativos
+_USB_VENDORS = {
+    # Periféricos (teclados, mouse, headsets)
+    '046D': 'Logitech',
+    '1532': 'Razer',
+    '1B1C': 'Corsair',
+    '1038': 'SteelSeries',
+    '0951': 'Kingston/HyperX',
+    '046E': 'Behavior Tech (BTC)',
+    '04F2': 'Chicony',
+    '0461': 'Primax/Genius',
+    '1BCF': 'Rapoo',
+    '258A': 'SINO WEALTH (Redragon/genéricos)',
+    '3938': 'MOSART (YR/genéricos)',
+    '09DA': 'A4Tech',
+    '1EA7': 'SHARKOON',
+    '28DA': 'Glorious',
+    '3434': 'Keychron',
+    '320F': 'Ducky',
+    '05AC': 'Apple',
+    '04D9': 'Holtek (teclados genéricos)',
+    '413C': 'Dell',
+    '03F0': 'HP',
+    '17EF': 'Lenovo',
+    '045E': 'Microsoft',
+    '04B3': 'IBM',
+    '1D57': 'Xenta',
+    '248A': 'Maxxter',
+    '275D': 'ROCCAT',
+    '0C45': 'Microdia (webcams/periféricos)',
+    '1A2C': 'China Resource (teclados mecánicos)',
+    '04CA': 'Lite-On Technology',
+    '0101': 'Logitech (legacy)',
+    # Almacenamiento USB
+    '0781': 'SanDisk',
+    '090C': 'Silicon Motion (pendrives)',
+    '058F': 'Alcor Micro (lectores SD)',
+    '0BDA': 'Realtek',
+    '1005': 'Apacer',
+    '13FE': 'Kingston (Phison)',
+    '0930': 'Toshiba',
+    '1F75': 'Innostor (pendrives)',
+    '054C': 'Sony',
+    '04E8': 'Samsung',
+    '0CF2': 'ENE Technology',
+    '8564': 'Transcend',
+    '1B1C': 'Corsair',
+    '0BC2': 'Seagate',
+    '1058': 'Western Digital',
+    '152D': 'JMicron (discos externos)',
+    '174C': 'ASMedia (discos externos)',
+    '2109': 'VIA Labs (hubs/docks)',
+    # Impresoras
+    '04A9': 'Canon',
+    '04B8': 'Epson',
+    '03F0': 'HP',
+    '04F9': 'Brother',
+    '0924': 'Xerox',
+    '04E8': 'Samsung',
+    '0482': 'Kyocera',
+    '06BC': 'OKI',
+    '0409': 'NEC',
+    # Audio
+    '1235': 'Focusrite',
+    '0D8C': 'C-Media (audio USB genérico)',
+    '08BB': 'Texas Instruments (audio)',
+    '1395': 'Sennheiser',
+    '0ECB': 'JBL',
+    '262A': 'Jabra',
+    '2B24': 'HyperX (audio)',
+    '0763': 'M-Audio',
+    '1532': 'Razer',
+    '12D1': 'Huawei',
+    '047F': 'Plantronics/Poly',
+    '0411': 'MelCo/Buffalo',
+    '041E': 'Creative',
+    '054C': 'Sony',
+    '05A7': 'Bose',
+    '0B05': 'ASUS',
+    '0ADC': 'Audio-Technica',
+    '3302': 'Edifier',
+    '2F68': 'Marshall',
+    '2516': 'Cooler Master',
+    '0572': 'Conexant (audio integrado)',
+    '1B3F': 'Generalplus (parlantes genéricos)',
+    '20A0': 'Turtle Beach',
+    '0D9A': 'Harman/AKG',
+    # Cámaras / video
+    '046D': 'Logitech',
+    '045E': 'Microsoft',
+    '1908': 'GEMBIRD',
+    '0AC8': 'Z-Star (webcams)',
+    '05A3': 'ARC International (webcams)',
+    '1B3F': 'Generalplus (webcams)',
+    '534D': 'MacroSilicon (capturadoras)',
+    # Red / conectividad
+    '0B95': 'ASIX (adaptadores Ethernet)',
+    '0BDA': 'Realtek',
+    '2357': 'TP-Link',
+    '148F': 'Ralink/MediaTek',
+    '0CF3': 'Qualcomm/Atheros',
+    '0A5C': 'Broadcom (Bluetooth)',
+    '8087': 'Intel',
+    '0E8D': 'MediaTek',
+    '7392': 'Edimax',
+    '2001': 'D-Link',
+    '0846': 'NetGear',
+    # Biometría / seguridad
+    '1050': 'Yubico (YubiKey)',
+    '27A6': 'Feitian (tokens)',
+    '096E': 'Feitian (legacy)',
+    '1FC9': 'NXP Semiconductors',
+    '138A': 'Validity Sensors (huella)',
+    '06CB': 'Synaptics (huella)',
+    '04F3': 'Elan Microelectronics (huella)',
+    # Smartphones / tablets
+    '18D1': 'Google',
+    '2717': 'Xiaomi',
+    '22B8': 'Motorola',
+    '04E8': 'Samsung',
+    '2A70': 'OnePlus',
+    '1004': 'LG',
+    '0BB4': 'HTC',
+    '19D2': 'ZTE',
+    '2C7C': 'Quectel (módems)',
+    # Monitores / docks
+    '0451': 'Texas Instruments (docks)',
+    '17E9': 'DisplayLink',
+    '056D': 'EIZO',
+    '0764': 'Cyber Power (UPS)',
+    '051D': 'APC (UPS)',
+    # Otros fabricantes comunes
+    '1366': 'SEGGER (programadores)',
+    '067B': 'Prolific (serial-USB)',
+    '0403': 'FTDI (serial-USB)',
+    '10C4': 'Silicon Labs (serial-USB)',
+    '2341': 'Arduino',
+    '1A86': 'QinHeng (CH340)',
+}
+
+# Fabricantes genéricos que no aportan info útil
+_FABRICANTES_GENERICOS = {
+    '(standard system devices)',
+    '(standard usb host controller)',
+    '(generic usb hub)',
+    'microsoft',
+    'compatible usb storage device',
+    '',
+}
+
+
+def _resolver_fabricante_por_vid(instance_id: str) -> str | None:
+    """Resuelve el nombre del fabricante a partir del VID en el InstanceId USB."""
+    if not instance_id:
+        return None
+    match = re.search(r'VID_([0-9A-Fa-f]{4})', instance_id)
+    if match:
+        vid = match.group(1).upper()
+        return _USB_VENDORS.get(vid)
+    return None
+
 
 def _normalizar_para_comparacion(texto: str) -> str:
     """Normaliza texto para comparación (evita problemas de codificación í/ı)"""
@@ -323,7 +485,7 @@ def obtener_dispositivos_usb():
         ps_script = """
         Get-PnpDevice -PresentOnly | 
         Where-Object {$_.InstanceId -like "*USB*" -and $_.Status -eq "OK"} | 
-        Select-Object FriendlyName, Class, Manufacturer | 
+        Select-Object FriendlyName, Class, Manufacturer, InstanceId |
         ConvertTo-Json
         """
         
@@ -346,11 +508,18 @@ def obtener_dispositivos_usb():
                 nombre = dispositivo.get('FriendlyName', '')
                 fabricante = dispositivo.get('Manufacturer', '')
                 clase = dispositivo.get('Class', 'Otro')
-                
+                instance_id = dispositivo.get('InstanceId', '')
+
                 # Excluir infraestructura interna
                 if _es_dispositivo_excluido(nombre):
                     continue
-                
+
+                # Si el fabricante es genérico, intentar resolver via VID
+                if fabricante.lower().strip() in _FABRICANTES_GENERICOS:
+                    vid_fabricante = _resolver_fabricante_por_vid(instance_id)
+                    if vid_fabricante:
+                        fabricante = vid_fabricante
+
                 nombre_final = _normalizar_nombre_usb(nombre, fabricante)
 
                 # Los HID genéricos no se deduplicан: puede haber varios físicamente

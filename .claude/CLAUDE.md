@@ -152,6 +152,12 @@ dotnet publish CyberWatch.Service/CyberWatch.Service.csproj -c Release -r win-x6
 
 ---
 
+## Cambios mínimos: solo lo solicitado
+
+Realizá únicamente el cambio que se solicita. No modifiques otras partes del código, no refactorices, no cambies estilos globales ni estructuras existentes. Si considerás que algo más debería cambiarse, primero sugerilo antes de hacerlo. Mantené intacto todo lo que no esté directamente relacionado con el requerimiento.
+
+---
+
 ## Verificar documentación antes de implementar
 
 Antes de realizar cualquier cambio técnico (código, configuración, comandos, dependencias, etc.):

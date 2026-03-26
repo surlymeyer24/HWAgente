@@ -1,0 +1,27 @@
+---
+description: Solo el cambio pedido; sin refactors ni alcance extra sin acuerdo previo
+alwaysApply: true
+---
+
+# Alcance mínimo del cambio
+
+- Implementá **únicamente** lo que el usuario pidió en el mensaje o tarea actual.
+- **No** modifiques código, archivos o configuración que no estén **directamente** relacionados con ese requerimiento.
+- **No** refactorices, renombres masivos, ni “mejoras” colaterales.
+- **No** cambies estilos globales, temas, tokens de diseño ni la estructura de carpetas/archivos existente salvo que forme parte explícita del pedido.
+
+## Si algo más conviene cambiar
+
+Si detectás que otra parte del código debería tocarse (riesgo, bug obvio, inconsistencia grave), **no lo hagas de inmediato**: describí la sugerencia de forma breve y pedí confirmación o tratála en un mensaje aparte antes de aplicarla.
+
+## Ejemplos
+
+```text
+Pedido: "Arreglar el botón de guardar en el formulario de perfil."
+
+❌ Mal: reformatear el módulo entero, unificar estilos en toda la app, renombrar hooks compartidos.
+
+✅ Bien: cambiar solo la lógica o el JSX del botón/guardado en ese formulario (y imports mínimos indispensables).
+```
+
+Mantené intacto todo lo que no sea necesario para cumplir el requerimiento tal cual fue formulado.
