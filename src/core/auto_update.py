@@ -192,15 +192,30 @@ def download_and_apply_update(url, uuid=None, hostname=None):
 
     flag_path = os.path.join(carpeta, FLAG_POST_AGENT_UPDATE)
     espera_ping = 6
-    espera_stop = 3
     bat_lines = [
         "@echo off",
         f"ping 127.0.0.1 -n {espera_ping + 1} > nul",
         f'sc stop "{SERVICIO_NOMBRE}"',
-        f"timeout /t {espera_stop} /nobreak > nul",
+        "timeout /t 5 /nobreak > nul",
+        # Forzar terminación si el proceso sigue vivo
+        f'taskkill /IM "{nombre_exe}" /F >nul 2>&1',
+        "timeout /t 3 /nobreak > nul",
+        # Reintentar copy hasta 3 veces (el exe puede tardar en liberarse)
         f'copy /Y "{nuevo_exe}" "{exe_actual}"',
-        f'if not errorlevel 1 type nul > "{flag_path}"',
+        "if not errorlevel 1 goto :copy_ok",
+        "timeout /t 5 /nobreak > nul",
+        f'copy /Y "{nuevo_exe}" "{exe_actual}"',
+        "if not errorlevel 1 goto :copy_ok",
+        "timeout /t 5 /nobreak > nul",
+        f'copy /Y "{nuevo_exe}" "{exe_actual}"',
+        "if not errorlevel 1 goto :copy_ok",
+        # Si los 3 intentos fallaron, arrancar el servicio con el exe viejo
         f'sc start "{SERVICIO_NOMBRE}"',
+        "goto :cleanup",
+        ":copy_ok",
+        f'type nul > "{flag_path}"',
+        f'sc start "{SERVICIO_NOMBRE}"',
+        ":cleanup",
         f'del /F /Q "{nuevo_exe}"',
         "del /F /Q \"%~f0\"",
     ]
