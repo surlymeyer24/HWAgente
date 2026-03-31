@@ -78,12 +78,53 @@ def inicializar_cache():
             'nucleos_fisicos': psutil.cpu_count(logical=False),
             'ram_total_gb': round(psutil.virtual_memory().total / (1024 ** 3), 2),
             'modelos_discos': obtener_modelos_discos_fisicos(),  # Cacheamos modelos
-            'tipos_discos': obtener_tipos_discos_fisicos()  # SSD / HDD
+            'tipos_discos': obtener_tipos_discos_fisicos(),  # SSD / HDD
+            'modulos_ram': obtener_modulos_ram(),
         }
     return _CACHE_ESTATICO
 
 
 # ==================== 1. SALUD DEL DISCO ====================
+def obtener_modulos_ram():
+    """Obtiene marca, modelo y velocidad de cada módulo RAM físico via WMI"""
+    modulos = []
+    try:
+        ps_script = """
+        Get-WmiObject Win32_PhysicalMemory |
+        Select-Object Manufacturer, PartNumber,
+                      @{Name='CapacidadGB';Expression={[math]::Round($_.Capacity / 1GB, 0)}},
+                      Speed |
+        ConvertTo-Json
+        """
+        resultado = subprocess.run(
+            ['powershell', '-NoProfile', '-Command', ps_script],
+            capture_output=True,
+            text=True,
+            encoding='utf-8', errors='replace',
+            timeout=10,
+            creationflags=subprocess.CREATE_NO_WINDOW
+        )
+        if resultado.returncode == 0 and resultado.stdout.strip():
+            datos = json.loads(resultado.stdout)
+            if isinstance(datos, dict):
+                datos = [datos]
+            for m in datos:
+                fabricante = (m.get('Manufacturer') or '').strip()
+                part = (m.get('PartNumber') or '').strip()
+                # Limpiar valores genéricos que no aportan info
+                if fabricante.lower() in ('', 'unknown', '04cb', 'manufacturer', 'not specified'):
+                    fabricante = ''
+                modulos.append({
+                    'fabricante': fabricante or 'Desconocido',
+                    'modelo': part or 'N/A',
+                    'capacidad_gb': m.get('CapacidadGB', 0),
+                    'velocidad_mhz': m.get('Speed', 0) or 0,
+                })
+    except Exception as e:
+        print(f"⚠️ No se pudo obtener módulos RAM: {e}")
+    return modulos
+
+
 def obtener_tipos_discos_fisicos():
     """Obtiene el tipo de cada disco físico (SSD/HDD) usando Get-PhysicalDisk"""
     tipos = {}
@@ -610,6 +651,7 @@ def obtener_datos_pc(incluir_pesados=True):
         "procesador": cache['procesador'],
         "nucleos_fisicos": cache['nucleos_fisicos'],
         "ram_total_gb": cache['ram_total_gb'],
+        "modulos_ram": cache['modulos_ram'],
         
         # Datos dinámicos ligeros
         "cpu_uso_porcentaje": psutil.cpu_percent(interval=0.5),  # REDUCIDO DE 1 A 0.5

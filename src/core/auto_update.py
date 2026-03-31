@@ -252,7 +252,7 @@ def download_and_apply_update(url, uuid=None, hostname=None):
             {
                 "bat_path_temp": bat_path,
                 "espera_inicial_seg": espera_ping,
-                "espera_tras_stop_seg": espera_stop,
+                "espera_tras_stop_seg": 5,
                 "flag_marcador": flag_path,
                 "sha256_descarga": sha_hex,
                 "bytes_a_instalar": nbytes,
