@@ -56,7 +56,7 @@ def instalar_servicio_automaticamente():
     subprocess.run('sc delete "AgenteMonitoreo"', shell=True, capture_output=True, 
                    creationflags=subprocess.CREATE_NO_WINDOW)
     
-    cmd = f'sc create "AgenteMonitoreo" binPath= "{exe_path}" start= auto DisplayName= "Agente de Monitoreo IT"'
+    cmd = f'sc create "AgenteMonitoreo" binPath= "{exe_path}" start= auto DisplayName= "AgenteBacar"'
     res = subprocess.run(cmd, shell=True, capture_output=True, text=True,
                         encoding='utf-8', errors='replace',
                         creationflags=subprocess.CREATE_NO_WINDOW)
@@ -71,7 +71,7 @@ def instalar_servicio_automaticamente():
 if RUNNING_AS_SERVICE:
     class AgenteMonitoreoService(win32serviceutil.ServiceFramework):
         _svc_name_ = "AgenteMonitoreo"
-        _svc_display_name_ = "Agente de Monitoreo IT"
+        _svc_display_name_ = "AgenteBacar"
         _svc_description_ = "Sincronización de hardware con Firebase."
 
         def __init__(self, args):

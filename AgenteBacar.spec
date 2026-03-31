@@ -46,7 +46,7 @@ _win_version = VSVersionInfo(
                     "040904B0",
                     [
                         StringStruct("CompanyName", ""),
-                        StringStruct("FileDescription", "AgenteBacar - Agente de monitoreo IT"),
+                        StringStruct("FileDescription", "AgenteBacar"),
                         StringStruct("FileVersion", VERSION),
                         StringStruct("InternalName", "AgenteBacar"),
                         StringStruct("LegalCopyright", ""),

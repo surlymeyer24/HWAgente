@@ -240,6 +240,7 @@ def obtener_salud_discos():
                 "punto_montaje": partition.mountpoint,
                 "modelo_disco": modelo,
                 "tipo_disco": tipo,
+                "disco_fisico_index": disco_index,
                 "total_gb": round(uso.total / (1024 ** 3), 2),
                 "usado_gb": round(uso.used / (1024 ** 3), 2),
                 "libre_gb": round(uso.free / (1024 ** 3), 2),
