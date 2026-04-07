@@ -1,0 +1,103 @@
+:root {
+  /* Brand */
+  --color-primary: #0e0f36;
+  --color-primary-hover: #23266b;
+
+  /* Danger */
+  --color-danger: #D21312;
+  --color-danger-hover: #ED2B2A;
+  --color-danger-light: #fde9e8;
+
+  /* Accent */
+  --color-accent: #F15A59;
+
+  /* Neutrals */
+  --color-text: #202124;
+  --color-text-secondary: #5f6368;
+  --color-border: rgba(255, 255, 255, 0.35);
+  --color-bg-light: #f8f9fa;
+  --color-gray: #9aa0a6;
+  --color-gray-hover: #80868b;
+
+  /* Success */
+  --color-success-bg: #ecedf8;
+  --color-success-border: #b0b3d6;
+
+  /* Azul clarito (secundario) y barra lateral */
+  --color-secondary: #d43e3e;
+  --color-secondary-light: #964646;
+  --color-sidebar-bar: #5c6bc0;
+
+  /* Aliases para el dashboard */
+  --text: var(--color-text);
+  --text-h: var(--color-text);
+  --text-muted: var(--color-text-secondary);
+  --bg: linear-gradient(135deg, #d5def5 0%, #bec9f3 25%, #ecc2c2 50%, #abbae6 75%, #f7e7e7 100%);
+  --card-bg: rgba(255, 255, 255, 0.55);
+  --header-bg: rgba(255, 255, 255, 0.4);
+  --border: var(--color-border);
+  --code-bg: rgba(236, 237, 248, 0.6);
+  --accent: var(--color-accent);
+  --accent-hover: var(--color-danger-hover);
+  --accent-bg: var(--color-danger-light);
+  --hover-bg: rgba(7, 10, 82, 0.06);
+  --shadow: rgba(14, 15, 54, 0.08);
+  --shadow-lg: rgba(14, 15, 54, 0.12);
+  --danger: var(--color-danger);
+  --sans: 'Inter', 'Segoe UI', system-ui, Roboto, sans-serif;
+  --mono: ui-monospace, 'Cascadia Code', Consolas, monospace;
+  --radius: 16px;
+  --radius-sm: 10px;
+  --radius-xs: 6px;
+  --glass-blur: blur(16px);
+  --glass-border: 1px solid rgba(255, 255, 255, 0.45);
+  --transition: 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: var(--sans);
+  font-size: 15px;
+  line-height: 1.6;
+  color: var(--text);
+  background: var(--bg);
+  background-attachment: fixed;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+code {
+  font-family: var(--mono);
+  font-size: 0.88em;
+}
+
+a {
+  color: var(--color-primary);
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.04);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #b0b0b0;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #909090;
+}

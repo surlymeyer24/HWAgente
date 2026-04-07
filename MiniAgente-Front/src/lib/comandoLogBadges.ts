@@ -1,0 +1,15 @@
+export const EVENTO_BADGE_HW: Record<string, string> = {
+  ACTUALIZAR_DATOS: 'badge-info',
+  ACTUALIZAR_DATOS_OK: 'badge-success',
+  INSTALAR_UPDATES: 'badge-info',
+  INSTALAR_UPDATES_OK: 'badge-success',
+  COMANDO_RECIBIDO: 'badge-info',
+  URL_ENCONTRADA: 'badge-info',
+  ACTUALIZACION_PROGRAMADA: 'badge-warning',
+  DESCARGA_INICIADA: 'badge-info',
+  DESCARGA_EXITOSA: 'badge-success',
+  DESCARGA_FALLIDA: 'badge-error',
+  REEMPLAZO_INICIADO: 'badge-success',
+  REEMPLAZO_COMPLETADO: 'badge-success',
+  ERROR: 'badge-error',
+};

@@ -3,13 +3,30 @@
     "allow": [
       "Read(//c/Users/Usr/Documents/CyberWatch/Front/**)",
       "Read(//c/Users/Usr/Documents/**)",
-      "Bash(firebase deploy:*)"
+      "Bash(firebase deploy:*)",
+      "Read(//c/Users/Usr/Downloads/**)",
+      "Bash(npm create:*)",
+      "Bash(cmd.exe /c \"cd C:\\\\Users\\\\Usr\\\\Documents && npm create vite@latest MiniAgente-Front -- --template react-ts 2>&1\")",
+      "Bash(export PATH=$PATH:/c/Users/Usr/AppData/Roaming/npm)",
+      "Read(//c/Users/Usr/AppData/Roaming/npm//**)",
+      "Bash(export PATH=\"$PATH:/c/Program Files/nodejs\")",
+      "Bash(npm install:*)",
+      "Bash(npm run:*)",
+      "Bash(node_modules/.bin/tsc -b)",
+      "Bash(npm list:*)",
+      "Bash(node node_modules/typescript/bin/tsc -b)",
+      "Bash(node node_modules/vite/bin/vite.js build)",
+      "Bash(export PATH=\"$PATH:/c/Users/Usr/Documents/MiniAgente/.venv/Scripts\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('c:/Users/Usr/Documents/MiniAgente/src/core/perifericos.py'\\).read\\(\\)\\); print\\('OK'\\)\")",
+      "Bash(python -c ':*)"
     ],
     "additionalDirectories": [
       "c:\\Users\\Usr\\Documents\\CyberWatch\\Front\\src\\types",
       "c:\\Users\\Usr\\Documents\\CyberWatch\\Front\\src\\lib",
       "c:\\Users\\Usr\\Documents\\CyberWatch\\Front\\src\\pages",
-      "c:\\Users\\Usr\\Documents\\CyberWatch"
+      "c:\\Users\\Usr\\Documents\\CyberWatch",
+      "C:\\Users\\Usr\\Documents\\MiniAgente-Front\\src",
+      "c:\\Users\\Usr\\Documents\\MiniAgente-Front"
     ]
   }
 }

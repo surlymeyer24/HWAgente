@@ -146,6 +146,46 @@ def obtener_resoluciones_monitores():
 
 
 # ==================== IMPRESORAS ====================
+_VIRTUAL_DRIVERS = {
+    'pdf', 'xps', 'fax', 'onenote', 'virtual', 'cutepdf', 'novapdf',
+    'foxit', 'bullzip', 'dopdf', 'print to', 'microsoft xps',
+}
+_VIRTUAL_PORTS = {'PORTPROMPT:', 'FILE:', 'NUL:', 'NULPORT:', 'FAX:'}
+_VIRTUAL_NAMES = {'pdf', 'xps', 'fax', 'onenote', 'snagit', 'print to', 'virtual printer'}
+
+
+def _clasificar_impresora(nombre: str, driver: str, puerto: str) -> tuple[str, str | None]:
+    """
+    Retorna (tipo_impresora, conexion_impresora).
+    tipo_impresora: 'fisica' | 'virtual'
+    conexion_impresora: 'usb' | 'red' | 'bluetooth' | 'local' | 'desconocida' | None (virtual)
+    """
+    nombre_l = (nombre or '').lower()
+    driver_l = (driver or '').lower()
+    puerto_u = (puerto or '').upper().strip()
+
+    es_virtual = (
+        any(kw in driver_l for kw in _VIRTUAL_DRIVERS)
+        or puerto_u in _VIRTUAL_PORTS
+        or any(kw in nombre_l for kw in _VIRTUAL_NAMES)
+    )
+    if es_virtual:
+        return 'virtual', None
+
+    if puerto_u.startswith('USB'):
+        conexion = 'usb'
+    elif puerto_u.startswith(('IP_', 'WSD-', 'TCP')):
+        conexion = 'red'
+    elif puerto_u.startswith('BT') or 'BLUETOOTH' in puerto_u:
+        conexion = 'bluetooth'
+    elif puerto_u.startswith(('LPT', 'COM')):
+        conexion = 'local'
+    else:
+        conexion = 'desconocida'
+
+    return 'fisica', conexion
+
+
 def obtener_impresoras():
     """Obtiene impresoras instaladas (locales y de red)"""
     impresoras = []
@@ -187,15 +227,23 @@ def obtener_impresoras():
                 datos = [datos]
             
             for impresora in datos:
-                impresoras.append({
-                    'nombre': impresora.get('Name', 'Desconocida'),
-                    'driver': impresora.get('DriverName', 'N/A'),
-                    'puerto': impresora.get('PortName', 'N/A'),
+                nombre = impresora.get('Name', 'Desconocida')
+                driver = impresora.get('DriverName', 'N/A')
+                puerto = impresora.get('PortName', 'N/A')
+                tipo_imp, conexion_imp = _clasificar_impresora(nombre, driver, puerto)
+                entry = {
+                    'nombre': nombre,
+                    'driver': driver,
+                    'puerto': puerto,
                     'tipo': impresora.get('Tipo', 'Desconocido'),
                     'estado': impresora.get('Estado', 'Desconocido'),
                     'compartida': impresora.get('Shared', False),
-                    'predeterminada': impresora.get('Predeterminada', False)
-                })
+                    'predeterminada': impresora.get('Predeterminada', False),
+                    'tipo_impresora': tipo_imp,
+                }
+                if conexion_imp is not None:
+                    entry['conexion_impresora'] = conexion_imp
+                impresoras.append(entry)
                 
     except Exception as e:
         print(f"⚠️ Error obteniendo impresoras: {e}")
@@ -386,6 +434,47 @@ _FABRICANTES_GENERICOS = {
 }
 
 
+# Palabras clave que identifican receptores inalámbricos USB (dongles)
+_RECEPTOR_KEYWORDS = [
+    'receiver', 'unifying receiver', 'nano receiver',
+    '2.4g wireless', 'usb wireless', 'wireless usb',
+    'rf receiver', 'transceiver', 'wireless receiver',
+]
+
+
+def _es_receptor_inalambrico(nombre: str) -> bool:
+    """True si el nombre del dispositivo corresponde a un receptor inalámbrico USB."""
+    nombre_norm = _normalizar_para_comparacion(nombre)
+    return any(kw in nombre_norm for kw in _RECEPTOR_KEYWORDS)
+
+
+def _extraer_vid(instance_id: str) -> str | None:
+    """Extrae el VID (Vendor ID) del InstanceId USB."""
+    match = re.search(r'VID_([0-9A-Fa-f]{4})', instance_id)
+    return match.group(1).upper() if match else None
+
+
+def _inferir_conexion(instance_id: str, vids_receptores: set | None = None) -> str:
+    """
+    Determina el tipo de conexión a partir del InstanceId del dispositivo.
+
+    Retorna:
+      'bluetooth'      — dispositivo Bluetooth (InstanceId empieza con BTHENUM/BTH/BTHHID)
+      'inalambrico_usb'— dongle inalámbrico USB (VID coincide con un receptor detectado)
+      'usb'            — USB cableado (o sin información suficiente)
+    """
+    if not instance_id:
+        return "usb"
+    upper = instance_id.upper()
+    if upper.startswith(("BTHENUM\\", "BTH\\", "BTHHID\\")):
+        return "bluetooth"
+    if vids_receptores:
+        vid = _extraer_vid(instance_id)
+        if vid and vid in vids_receptores:
+            return "inalambrico_usb"
+    return "usb"
+
+
 def _resolver_fabricante_por_vid(instance_id: str) -> str | None:
     """Resuelve el nombre del fabricante a partir del VID en el InstanceId USB."""
     if not instance_id:
@@ -483,8 +572,8 @@ def obtener_dispositivos_usb():
     
     try:
         ps_script = """
-        Get-PnpDevice -PresentOnly | 
-        Where-Object {$_.InstanceId -like "*USB*" -and $_.Status -eq "OK"} | 
+        Get-PnpDevice -PresentOnly |
+        Where-Object {($_.InstanceId -like "*USB*" -or $_.InstanceId -like "BTHENUM*" -or $_.InstanceId -like "BTH\\*" -or $_.InstanceId -like "BTHHID*") -and $_.Status -eq "OK"} |
         Select-Object FriendlyName, Class, Manufacturer, InstanceId |
         ConvertTo-Json
         """
@@ -543,7 +632,18 @@ def obtener_dispositivos_usb():
                     'fabricante': fabricante or '—',
                     'clase': clase,
                     '_hid_tipo': hid_tipo,
+                    '_instance_id': instance_id,
                 })
+
+            # Detectar receptores inalámbricos USB y recolectar sus VIDs
+            # Un receptor con el mismo VID que el teclado/mouse indica que es inalámbrico
+            vids_receptores: set[str] = set()
+            for raw in datos:
+                nombre_raw = raw.get('FriendlyName', '')
+                if _es_receptor_inalambrico(nombre_raw):
+                    vid = _extraer_vid(raw.get('InstanceId', ''))
+                    if vid:
+                        vids_receptores.add(vid)
 
             # Separar teclados, mouses y HID ambiguos
             teclados = [d for d in dispositivos if d.get('_hid_tipo') == 'teclado']
@@ -567,6 +667,7 @@ def obtener_dispositivos_usb():
                     'categoria': 'Teclado',
                     'fabricante': _extraer_marca(teclados[0]) if n == 1 else '—',
                     'clase': 'Keyboard',
+                    'conexion': _inferir_conexion(teclados[0].get('_instance_id', ''), vids_receptores),
                 })
             if mouses:
                 n = len(mouses)
@@ -575,6 +676,7 @@ def obtener_dispositivos_usb():
                     'categoria': 'Mouse',
                     'fabricante': _extraer_marca(mouses[0]) if n == 1 else '—',
                     'clase': 'Mouse',
+                    'conexion': _inferir_conexion(mouses[0].get('_instance_id', ''), vids_receptores),
                 })
             if otros_hid:
                 n = len(otros_hid)
@@ -585,9 +687,10 @@ def obtener_dispositivos_usb():
                     'clase': 'HIDClass',
                 })
 
-            # Limpiar campo interno
+            # Limpiar campos internos
             for d in otros:
                 d.pop('_hid_tipo', None)
+                d.pop('_instance_id', None)
             dispositivos = otros
             
             # Ordenar: primero por categoría, luego por nombre
