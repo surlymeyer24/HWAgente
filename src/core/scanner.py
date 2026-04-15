@@ -253,12 +253,100 @@ def obtener_salud_discos():
 
 
 # ==================== 4. RED ====================
+def _mapa_perfiles_conexion_windows():
+    """
+    Nombre de red / perfil por interfaz (Get-NetConnectionProfile).
+    En Wi-Fi, Name suele ser el SSID. Requiere PowerShell.
+    """
+    mapa = {}
+    try:
+        ps_script = """
+        Get-NetConnectionProfile -ErrorAction SilentlyContinue |
+        ForEach-Object {
+            [PSCustomObject]@{
+                Name = [string]$_.Name
+                InterfaceAlias = [string]$_.InterfaceAlias
+                NetworkCategory = $_.NetworkCategory.ToString()
+            }
+        } | ConvertTo-Json -Compress
+        """
+        resultado = subprocess.run(
+            ['powershell', '-NoProfile', '-Command', ps_script],
+            capture_output=True,
+            text=True,
+            encoding='utf-8', errors='replace',
+            timeout=8,
+            creationflags=subprocess.CREATE_NO_WINDOW,
+        )
+        if resultado.returncode != 0 or not resultado.stdout.strip():
+            return mapa
+        datos = json.loads(resultado.stdout.strip())
+        if isinstance(datos, dict):
+            datos = [datos]
+        for item in datos:
+            alias = (item.get('InterfaceAlias') or '').strip()
+            if not alias:
+                continue
+            clave = alias.lower()
+            mapa[clave] = {
+                'nombre_perfil': (item.get('Name') or '').strip() or None,
+                'categoria_red': (item.get('NetworkCategory') or '').strip() or None,
+            }
+    except Exception as e:
+        print(f"⚠️ No se pudo leer perfiles de red: {e}")
+    return mapa
+
+
+def _ssid_wlan_actual():
+    """SSID de la WLAN conectada (netsh); None si no hay Wi‑Fi o no está asociada."""
+    try:
+        resultado = subprocess.run(
+            ['netsh', 'wlan', 'show', 'interfaces'],
+            capture_output=True,
+            text=True,
+            encoding='utf-8', errors='replace',
+            timeout=8,
+            creationflags=subprocess.CREATE_NO_WINDOW,
+        )
+        if resultado.returncode != 0 or not resultado.stdout:
+            return None
+        for linea in resultado.stdout.splitlines():
+            linea = linea.strip()
+            if ':' not in linea:
+                continue
+            clave, _, valor = linea.partition(':')
+            if clave.strip().lower() != 'ssid':
+                continue
+            v = valor.strip()
+            if not v or v.lower() in ('none', 'n/a', '—', '-'):
+                return None
+            return v
+    except Exception:
+        pass
+    return None
+
+
+def _emparejar_perfil_interfaz(nombre_interfaz, mapa_perfiles):
+    """Busca perfil por nombre de interfaz (psutil) contra InterfaceAlias de Windows."""
+    if not nombre_interfaz or not mapa_perfiles:
+        return None
+    n = nombre_interfaz.strip().lower()
+    if n in mapa_perfiles:
+        return mapa_perfiles[n]
+    for alias, perfil in mapa_perfiles.items():
+        if alias == n or n.startswith(alias) or alias.startswith(n):
+            return perfil
+    return None
+
+
 def obtener_info_red():
-    """Obtiene información de red optimizada"""
+    """Obtiene información de red optimizada (adaptadores, tráfico, perfil/SSID si aplica)."""
     adaptadores = []
     stats = psutil.net_if_stats()
     addrs = psutil.net_if_addrs()
-    
+    mapa_perfiles = _mapa_perfiles_conexion_windows()
+    wifi_ssid = _ssid_wlan_actual()
+
     for interfaz, datos in stats.items():
         if datos.isup:
             ips = []
@@ -266,28 +354,45 @@ def obtener_info_red():
                 for addr in addrs[interfaz]:
                     if addr.family == 2:  # IPv4
                         ips.append(addr.address)
-            
-            adaptadores.append({
+
+            entry = {
                 "nombre": interfaz,
                 "activo": datos.isup,
                 "velocidad_mbps": datos.speed if datos.speed > 0 else "Desconocida",
-                "ips": ips
-            })
-    
+                "ips": ips,
+            }
+            if ips:
+                entry["ip"] = ips[0]
+
+            perfil = _emparejar_perfil_interfaz(interfaz, mapa_perfiles)
+            if perfil:
+                if perfil.get('nombre_perfil'):
+                    entry['perfil_red'] = perfil['nombre_perfil']
+                if perfil.get('categoria_red'):
+                    entry['categoria_red'] = perfil['categoria_red']
+
+            adaptadores.append(entry)
+
     net_io = psutil.net_io_counters()
     trafico = {
         "bytes_enviados_mb": round(net_io.bytes_sent / (1024 ** 2), 2),
         "bytes_recibidos_mb": round(net_io.bytes_recv / (1024 ** 2), 2),
+        "enviado_mb": round(net_io.bytes_sent / (1024 ** 2), 2),
+        "recibido_mb": round(net_io.bytes_recv / (1024 ** 2), 2),
         "paquetes_enviados": net_io.packets_sent,
         "paquetes_recibidos": net_io.packets_recv,
         "errores_entrada": net_io.errin,
         "errores_salida": net_io.errout
     }
-    
-    return {
+
+    out = {
         "adaptadores": adaptadores,
-        "trafico": trafico
+        "trafico": trafico,
     }
+    if wifi_ssid:
+        out['wifi_ssid'] = wifi_ssid
+
+    return out
 
 
 # ==================== 5. ERRORES DEL SISTEMA ====================

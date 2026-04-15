@@ -434,11 +434,27 @@ _FABRICANTES_GENERICOS = {
 }
 
 
-# Palabras clave que identifican receptores inalámbricos USB (dongles)
+# Palabras clave que identifican receptores inalámbricos USB (dongles).
+# Incluye inglés y español (Windows localizado) y marcas comunes (Logitech Bolt, Lightspeed, etc.).
+# PIDs USB de receptores Logitech (Unifying, Nano, Lightspeed, Bolt, etc.).
+# Fuente: Solaar lib/logitech_receiver/base_usb.py — mismos IDs que el driver Linux hid-logitech-dj.
+_LOGITECH_RECEIVER_PIDS = frozenset({
+    'C517', 'C518', 'C51A', 'C51B', 'C521', 'C525', 'C526', 'C52B', 'C52E', 'C52F',
+    'C531', 'C532', 'C534', 'C535', 'C537', 'C539', 'C53A', 'C53D', 'C53F', 'C541',
+    'C545', 'C547', 'C548', 'C54D',
+})
+
 _RECEPTOR_KEYWORDS = [
+    'unifying',  # "Logitech Unifying" sin la palabra "receiver"
     'receiver', 'unifying receiver', 'nano receiver',
     '2.4g wireless', 'usb wireless', 'wireless usb',
     'rf receiver', 'transceiver', 'wireless receiver',
+    'dongle', 'usb dongle', 'wireless dongle',
+    'lightspeed', 'logi bolt', 'bolt receiver',
+    'receptor', 'receptor usb', 'usb receptor', 'receptor inalambrico',
+    'receptor nano', 'receptor rf',
+    'inalambrico', 'dispositivo inalambrico', 'usb inalambrico',
+    '2.4ghz', '2,4ghz', '2.4 ghz', '2,4 ghz',
 ]
 
 
@@ -454,24 +470,77 @@ def _extraer_vid(instance_id: str) -> str | None:
     return match.group(1).upper() if match else None
 
 
-def _inferir_conexion(instance_id: str, vids_receptores: set | None = None) -> str:
+def _extraer_pid(instance_id: str) -> str | None:
+    """Extrae el PID (Product ID) del InstanceId USB."""
+    match = re.search(r'PID_([0-9A-Fa-f]{4})', instance_id)
+    return match.group(1).upper() if match else None
+
+
+def _es_logitech_receptor_por_pid(instance_id: str) -> bool:
+    """True si el InstanceId corresponde a un receptor inalámbrico Logitech (mismo PID en interfaces HID del composite)."""
+    if _extraer_vid(instance_id) != '046D':
+        return False
+    pid = _extraer_pid(instance_id)
+    return bool(pid and pid in _LOGITECH_RECEIVER_PIDS)
+
+
+def _conexion_por_nombre_dispositivo(nombre: str) -> str | None:
+    """
+    Si el nombre amigable del PnP ya indica inalámbrico (sin depender del receptor/dongle).
+    """
+    n = _normalizar_para_comparacion(nombre or "")
+    if not n:
+        return None
+    if "bluetooth" in n or n.startswith("bt "):
+        return "bluetooth"
+    if any(
+        p in n
+        for p in (
+            "wireless keyboard",
+            "wireless mouse",
+            "wireless combo",
+            "teclado inalambrico",
+            "mouse inalambrico",
+            "raton inalambrico",
+            "combo inalambrico",
+            "2.4g keyboard",
+            "2.4g mouse",
+            "rf keyboard",
+            "rf mouse",
+        )
+    ):
+        return "inalambrico_usb"
+    return None
+
+
+def _inferir_conexion(
+    instance_id: str, vids_receptores: set | None = None, nombre_dispositivo: str = ""
+) -> str:
     """
     Determina el tipo de conexión a partir del InstanceId del dispositivo.
 
     Retorna:
       'bluetooth'      — dispositivo Bluetooth (InstanceId empieza con BTHENUM/BTH/BTHHID)
       'inalambrico_usb'— dongle inalámbrico USB (VID coincide con un receptor detectado)
+                         o nombre PnP indica kit inalámbrico
       'usb'            — USB cableado (o sin información suficiente)
     """
     if not instance_id:
-        return "usb"
+        return _conexion_por_nombre_dispositivo(nombre_dispositivo) or "usb"
     upper = instance_id.upper()
     if upper.startswith(("BTHENUM\\", "BTH\\", "BTHHID\\")):
         return "bluetooth"
+    # Logitech: teclado/ratón vía dongle comparten VID+PID del receptor (p. ej. C52B); el dongle suele llamarse
+    # "USB Input Device" y no matchea por nombre.
+    if _es_logitech_receptor_por_pid(instance_id):
+        return "inalambrico_usb"
     if vids_receptores:
         vid = _extraer_vid(instance_id)
         if vid and vid in vids_receptores:
             return "inalambrico_usb"
+    por_nombre = _conexion_por_nombre_dispositivo(nombre_dispositivo)
+    if por_nombre:
+        return por_nombre
     return "usb"
 
 
@@ -662,21 +731,31 @@ def obtener_dispositivos_usb():
 
             if teclados:
                 n = len(teclados)
+                t0 = teclados[0]
                 otros.append({
                     'nombre': 'Teclado' + (f' ({n} dispositivos)' if n > 1 else ''),
                     'categoria': 'Teclado',
-                    'fabricante': _extraer_marca(teclados[0]) if n == 1 else '—',
+                    'fabricante': _extraer_marca(t0) if n == 1 else '—',
                     'clase': 'Keyboard',
-                    'conexion': _inferir_conexion(teclados[0].get('_instance_id', ''), vids_receptores),
+                    'conexion': _inferir_conexion(
+                        t0.get('_instance_id', ''),
+                        vids_receptores,
+                        t0.get('nombre', ''),
+                    ),
                 })
             if mouses:
                 n = len(mouses)
+                m0 = mouses[0]
                 otros.append({
                     'nombre': 'Mouse' + (f' ({n} dispositivos)' if n > 1 else ''),
                     'categoria': 'Mouse',
-                    'fabricante': _extraer_marca(mouses[0]) if n == 1 else '—',
+                    'fabricante': _extraer_marca(m0) if n == 1 else '—',
                     'clase': 'Mouse',
-                    'conexion': _inferir_conexion(mouses[0].get('_instance_id', ''), vids_receptores),
+                    'conexion': _inferir_conexion(
+                        m0.get('_instance_id', ''),
+                        vids_receptores,
+                        m0.get('nombre', ''),
+                    ),
                 })
             if otros_hid:
                 n = len(otros_hid)
@@ -741,10 +820,18 @@ def formatear_dispositivos_usb(dispositivos: list, usar_emoji: bool = False) -> 
         
         nombre = d.get('nombre', 'Desconocido')
         fab = d.get('fabricante', '')
+        cx = d.get('conexion')
+        sufijo_cx = ""
+        if cx == "bluetooth":
+            sufijo_cx = " [Bluetooth]"
+        elif cx == "inalambrico_usb":
+            sufijo_cx = " [Inalámbrico USB]"
+        elif cx == "usb":
+            sufijo_cx = " [USB cableado]"
         if fab and fab != '—' and fab not in nombre:
-            lineas.append(f"      • {nombre} ({fab})")
+            lineas.append(f"      • {nombre} ({fab}){sufijo_cx}")
         else:
-            lineas.append(f"      • {nombre}")
+            lineas.append(f"      • {nombre}{sufijo_cx}")
     
     return '\n'.join(lineas).strip() if lineas else "  No se detectaron periféricos USB"
 

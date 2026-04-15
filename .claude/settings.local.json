@@ -7,7 +7,8 @@
       "Bash(python -c \"import pkg_resources; print\\(''\\\\n''.join\\(str\\(r.key\\) for r in pkg_resources.working_set\\)\\)\")",
       "Bash(find /c/Users/Usr/Documents/MiniAgente -type f \\\\\\(-name *.json -o -name *.yml -o -name *.yaml -o -name *.spec \\\\\\))",
       "Bash(find /c/Users/Usr/Documents/MiniAgente/src -name *.py -type f)",
-      "Bash(powershell -Command \"Get-PhysicalDisk | Select-Object DeviceId, MediaType | ConvertTo-Json\")"
+      "Bash(powershell -Command \"Get-PhysicalDisk | Select-Object DeviceId, MediaType | ConvertTo-Json\")",
+      "Bash(npx tsc:*)"
     ]
   }
 }

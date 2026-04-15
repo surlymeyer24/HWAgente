@@ -1,5 +1,17 @@
 import { useState } from 'react';
+import {
+  ClipboardList,
+  LayoutDashboard,
+  Monitor,
+  Zap,
+} from 'lucide-react';
 import { NavLink, Outlet } from 'react-router-dom';
+
+const navIconProps = {
+  size: 20,
+  strokeWidth: 1.75,
+  'aria-hidden': true as const,
+};
 
 export function Layout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -9,8 +21,10 @@ export function Layout() {
       {/* Mobile topbar */}
       <div className="mobile-topbar">
         <NavLink to="/" className="logo" onClick={() => setSidebarOpen(false)}>
-          <span className="logo-icon">🖥</span>
-          HW Dashboard
+          <span className="logo-icon">
+            <Monitor size={16} strokeWidth={2} aria-hidden />
+          </span>
+          AgenteBacar
         </NavLink>
         <button
           className="hamburger"
@@ -34,8 +48,10 @@ export function Layout() {
       {/* Sidebar */}
       <aside className={`sidebar${sidebarOpen ? ' sidebar--open' : ''}`}>
         <NavLink to="/" className="logo" onClick={() => setSidebarOpen(false)}>
-          <span className="logo-icon">🖥</span>
-          HW Dashboard
+          <span className="logo-icon">
+            <Monitor size={16} strokeWidth={2} aria-hidden />
+          </span>
+          AgenteBacar
         </NavLink>
         <nav className="nav">
           <NavLink
@@ -44,28 +60,32 @@ export function Layout() {
             className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}
             onClick={() => setSidebarOpen(false)}
           >
-            📊 Dashboard
+            <LayoutDashboard {...navIconProps} />
+            Dashboard
           </NavLink>
           <NavLink
             to="/inventario"
             className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}
             onClick={() => setSidebarOpen(false)}
           >
-            🗂 Inventario
+            <ClipboardList {...navIconProps} />
+            Inventario
           </NavLink>
           <NavLink
             to="/computadoras"
             className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}
             onClick={() => setSidebarOpen(false)}
           >
-            💻 Computadoras
+            <Monitor {...navIconProps} />
+            Computadoras
           </NavLink>
           <NavLink
             to="/tareas"
             className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}
             onClick={() => setSidebarOpen(false)}
           >
-            ⚡ Tareas
+            <Zap {...navIconProps} />
+            Tareas
           </NavLink>
         </nav>
       </aside>

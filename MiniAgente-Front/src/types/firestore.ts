@@ -33,6 +33,8 @@ export interface HWPerifericos {
     categoria?: string;
     fabricante?: string;
     clase?: string;
+    /** usb | bluetooth | inalambrico_usb — teclado/mouse consolidados */
+    conexion?: string;
   }>;
   impresoras?: Array<{ nombre?: string; tipo?: string; estado?: string; tipo_impresora?: string; conexion_impresora?: string }>;
   audio?: { salida?: Array<{ nombre?: string }> };
@@ -70,8 +72,23 @@ export interface HWSoftwareCritico {
 }
 
 export interface HWRed {
-  trafico?: { enviado_mb?: number | string; recibido_mb?: number | string };
-  adaptadores?: Array<{ nombre?: string; ip?: string }>;
+  /** SSID WLAN actual (netsh), si la PC está asociada a una red Wi‑Fi */
+  wifi_ssid?: string | null;
+  trafico?: {
+    enviado_mb?: number | string;
+    recibido_mb?: number | string;
+    bytes_enviados_mb?: number | string;
+    bytes_recibidos_mb?: number | string;
+  };
+  adaptadores?: Array<{
+    nombre?: string;
+    ip?: string;
+    ips?: string[];
+    /** Nombre de perfil / SSID (Wi‑Fi) u otro nombre asignado por Windows */
+    perfil_red?: string | null;
+    /** p. ej. Public, Private, DomainAuthenticated */
+    categoria_red?: string | null;
+  }>;
   [key: string]: unknown;
 }
 

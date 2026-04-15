@@ -4,18 +4,18 @@
   --color-primary-hover: #23266b;
 
   /* Danger */
-  --color-danger: #D21312;
-  --color-danger-hover: #ED2B2A;
+  --color-danger: #9c1313;
+  --color-danger-hover: #af2222;
   --color-danger-light: #fde9e8;
 
   /* Accent */
-  --color-accent: #F15A59;
+  --color-accent: #991d1d;
 
   /* Neutrals */
   --color-text: #202124;
   --color-text-secondary: #5f6368;
-  --color-border: rgba(255, 255, 255, 0.35);
-  --color-bg-light: #f8f9fa;
+  --color-border: #c8cdd5;
+  --color-bg-light: #f4f5f8;
   --color-gray: #9aa0a6;
   --color-gray-hover: #80868b;
 
@@ -32,25 +32,25 @@
   --text: var(--color-text);
   --text-h: var(--color-text);
   --text-muted: var(--color-text-secondary);
-  --bg: linear-gradient(135deg, #d5def5 0%, #bec9f3 25%, #ecc2c2 50%, #abbae6 75%, #f7e7e7 100%);
-  --card-bg: rgba(255, 255, 255, 0.55);
-  --header-bg: rgba(255, 255, 255, 0.4);
+  --bg: #eef0f4;
+  --card-bg: #ffffff;
+  --header-bg: #ffffff;
   --border: var(--color-border);
-  --code-bg: rgba(236, 237, 248, 0.6);
+  --code-bg: #ecedf8;
   --accent: var(--color-accent);
   --accent-hover: var(--color-danger-hover);
   --accent-bg: var(--color-danger-light);
-  --hover-bg: rgba(7, 10, 82, 0.06);
-  --shadow: rgba(14, 15, 54, 0.08);
-  --shadow-lg: rgba(14, 15, 54, 0.12);
+  --hover-bg: #f0f1f8;
+  --shadow: rgba(14, 15, 54, 0.06);
+  --shadow-lg: rgba(14, 15, 54, 0.10);
   --danger: var(--color-danger);
-  --sans: 'Inter', 'Segoe UI', system-ui, Roboto, sans-serif;
+  --sans: 'Inter';
   --mono: ui-monospace, 'Cascadia Code', Consolas, monospace;
-  --radius: 16px;
-  --radius-sm: 10px;
-  --radius-xs: 6px;
-  --glass-blur: blur(16px);
-  --glass-border: 1px solid rgba(255, 255, 255, 0.45);
+  --radius: 8px;
+  --radius-sm: 6px;
+  --radius-xs: 4px;
+  --glass-blur: none;
+  --glass-border: 1px solid var(--color-border);
   --transition: 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
@@ -65,7 +65,6 @@ body {
   line-height: 1.6;
   color: var(--text);
   background: var(--bg);
-  background-attachment: fixed;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }

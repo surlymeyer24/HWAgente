@@ -4,6 +4,7 @@ import { Dashboard } from './pages/Dashboard';
 import { Inventario } from './pages/Inventario';
 import { Tareas } from './pages/Tareas';
 import { Computadoras } from './pages/Computadoras';
+import { ComputadoraDetalle } from './pages/ComputadoraDetalle';
 import './App.css';
 
 function App() {
@@ -15,6 +16,7 @@ function App() {
           <Route path="inventario" element={<Inventario />} />
           <Route path="tareas" element={<Tareas />} />
           <Route path="computadoras" element={<Computadoras />} />
+          <Route path="computadoras/:id" element={<ComputadoraDetalle />} />
         </Route>
       </Routes>
     </BrowserRouter>

@@ -27,7 +27,7 @@ Agente de monitoreo IT para Windows. Se instala como servicio del sistema, recop
 | CPU | Uso porcentual (muestreo de 0.5s) |
 | RAM | Uso porcentual |
 | Discos | Espacio total/usado/libre por partición |
-| Red | Adaptadores activos, IPs, velocidad, tráfico acumulado |
+| Red | Adaptadores activos, IPs, velocidad, tráfico acumulado; **perfil de conexión** por interfaz (`perfil_red`, `categoria_red` vía `Get-NetConnectionProfile`); **SSID Wi‑Fi** (`wifi_ssid` vía `netsh wlan`) cuando está asociado |
 | Servicios críticos | Windows Defender, Windows Update, Firewall, Security Center |
 
 #### Datos pesados — cada 15-60 minutos
@@ -43,7 +43,7 @@ Agente de monitoreo IT para Windows. Se instala como servicio del sistema, recop
 ### Detección de periféricos
 
 - **Monitores**: nombre, resolución, tamaño físico en cm y pulgadas
-- **Teclado y mouse**: detectados desde dispositivos USB HID, con marca si está disponible
+- **Teclado y mouse**: detectados desde dispositivos USB HID, con marca si está disponible; campo `conexion` en Firestore (`usb`, `inalambrico_usb`, `bluetooth`) cuando se puede inferir (nombre del dongle, **PID USB de receptores Logitech** alineado con Solaar/Unifying-Bolt-Lightspeed, o Bluetooth)
 - **Otros USB**: almacenamiento, cámaras, adaptadores Bluetooth, impresoras USB, etc.
 - **Audio**: dispositivos de salida (parlantes, auriculares)
 - **Impresoras**: tipo (local/red), driver, puerto, estado, impresora predeterminada
@@ -129,10 +129,26 @@ El script **une** `computadoras` y `tareas` por UUID. Si **`version_agente`** co
 
 ---
 
+## Dashboard web (`MiniAgente-Front`)
+
+Aplicación **React + TypeScript + Vite** que lee la colección **`computadoras`** (y datos relacionados) en **Firestore** para visualizar el parque sin instalar el agente en la PC de administración.
+
+| Ruta | Contenido |
+|------|-----------|
+| **`/`** | Resumen (dashboard) |
+| **`/inventario`** | Tabla de inventario: **CPU**, **RAM** (por módulo o total), **discos** agrupados por disco físico con tipo **SSD / HDD / desconocido** en la columna de tipo, **periféricos** (monitores, USB, impresoras, audio). Filtros por categoría (chips + desplegable) y búsqueda por texto. |
+| **`/computadoras`** | Listado y detalle por equipo (hardware, red, software crítico, periféricos, incl. `conexion` en USB cuando el agente lo envía). |
+| **`/tareas`** | Tareas / comandos remotos |
+
+**Configuración:** variables de entorno `VITE_FIREBASE_*` (misma app Firebase que usa el agente). Detalle de rutas, scripts y tipos: **`MiniAgente-Front/README.md`**.
+
+---
+
 ## Estructura del proyecto
 
 ```
 MiniAgente/
+├── MiniAgente-Front/            # Dashboard web (Vite + React); ver README dentro de la carpeta
 ├── main.py                      # Entry point, lógica del servicio Windows
 ├── verificar_actualizaciones.py # Lista version_agente y último comando por PC (Firebase)
 ├── verificar_version.bat        # Atajo CMD para el script anterior
