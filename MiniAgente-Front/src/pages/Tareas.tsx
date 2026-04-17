@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useTareasHW } from '../hooks/useTareasHW';
 import { useComputadorasHW } from '../hooks/useComputadorasHW';
-import { useComandoHW } from '../hooks/useComandoHW';
+import { useComandoHW, enviarComandoAMaquinas } from '../hooks/useComandoHW';
 import {
   useLogsActualizacion,
   deleteLogsActualizacionCoinciden,
@@ -67,6 +67,8 @@ export function Tareas() {
   const [feedbackBorrarLogs, setFeedbackBorrarLogs] = useState<{ ok: boolean; text: string } | null>(
     null
   );
+  const [enviandoActualizarTodas, setEnviandoActualizarTodas] = useState(false);
+  const [errorActualizarTodas, setErrorActualizarTodas] = useState<string | null>(null);
 
   const rangoFechasInvalido = Boolean(
     logFechaDesde && logFechaHasta && logFechaDesde > logFechaHasta
@@ -114,6 +116,28 @@ export function Tareas() {
     }
   }
 
+  async function handleActualizarDatosTodas() {
+    const n = computadoras.length;
+    if (
+      !window.confirm(
+        `¿Enviar ACTUALIZAR_DATOS a las ${n} máquina${n !== 1 ? 's' : ''} listadas?\n\n` +
+          'Cada agente hará una sincronización completa cuando lea el comando en Firestore.'
+      )
+    ) {
+      return;
+    }
+    setErrorActualizarTodas(null);
+    setEnviandoActualizarTodas(true);
+    const res = await enviarComandoAMaquinas(
+      computadoras.map((c) => c.id),
+      'ACTUALIZAR_DATOS'
+    );
+    setEnviandoActualizarTodas(false);
+    if (!res.ok) {
+      setErrorActualizarTodas(res.message);
+    }
+  }
+
   if (loading) {
     return (
       <div className="page">
@@ -150,11 +174,30 @@ export function Tareas() {
         ) : computadoras.length === 0 ? (
           <p className="muted">No hay computadoras en la BD.</p>
         ) : (
-          <div className="comandos-hw-list">
-            {computadoras.map((c) => (
-              <ComandosMaquina key={c.id} computadoraId={c.id} hostname={c.hostname ?? c.id} />
-            ))}
-          </div>
+          <>
+            <div className="actions" style={{ marginBottom: '1rem' }}>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                disabled={enviandoActualizarTodas}
+                onClick={() => void handleActualizarDatosTodas()}
+              >
+                {enviandoActualizarTodas
+                  ? 'Enviando a todas…'
+                  : `Actualizar datos en todas (${computadoras.length})`}
+              </button>
+            </div>
+            {errorActualizarTodas && (
+              <p className="error small" style={{ marginBottom: '0.75rem' }}>
+                {errorActualizarTodas}
+              </p>
+            )}
+            <div className="comandos-hw-list">
+              {computadoras.map((c) => (
+                <ComandosMaquina key={c.id} computadoraId={c.id} hostname={c.hostname ?? c.id} />
+              ))}
+            </div>
+          </>
         )}
       </section>
 
