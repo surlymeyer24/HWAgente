@@ -291,8 +291,70 @@ _contadores = {
     'ultima_sync_errores': 0,
     'ultima_sync_perifericos': 0,
     'ultima_sync_updates': 0,
-    'ultima_sync_software': 0
+    'ultima_sync_software': 0,
+    'ultima_sync_programas': 0
 }
+
+
+def sincronizar_programas_instalados(uuid_pc, programas):
+    """
+    Escribe la lista en la subcolección computadoras/{uuid}/programas/{slug}.
+    - Un doc por programa; el slug se deriva del nombre, así que un upgrade de versión sobrescribe el mismo doc.
+    - Borra docs huérfanos (programas desinstalados desde el último sync).
+    """
+    if not uuid_pc or programas is None:
+        return
+    try:
+        from src.core.programas_instalados import slug_programa
+    except Exception as e:
+        log_debug(f"sincronizar_programas_instalados: import falló: {e}")
+        return
+    try:
+        sub_ref = (
+            db.collection(FIREBASE_COLLECTION_NAME)
+            .document(uuid_pc)
+            .collection("programas")
+        )
+        slugs_actuales = set()
+        batch = db.batch()
+        ops = 0
+        for p in programas:
+            nombre = (p.get("nombre") or "").strip()
+            slug = slug_programa(nombre)
+            if not slug:
+                continue
+            slugs_actuales.add(slug)
+            doc_data = {
+                "nombre": nombre,
+                "version": p.get("version") or "",
+                "publisher": p.get("publisher") or "",
+                "fecha_instalacion": p.get("fecha_instalacion") or "",
+                "arquitectura": p.get("arquitectura") or "",
+                "ultima_vez_visto": firestore.SERVER_TIMESTAMP,
+            }
+            batch.set(sub_ref.document(slug), doc_data)
+            ops += 1
+            if ops >= 400:
+                batch.commit()
+                batch = db.batch()
+                ops = 0
+
+        for doc in sub_ref.stream():
+            if doc.id not in slugs_actuales:
+                batch.delete(doc.reference)
+                ops += 1
+                if ops >= 400:
+                    batch.commit()
+                    batch = db.batch()
+                    ops = 0
+
+        if ops > 0:
+            batch.commit()
+        log_debug(
+            f"Programas sync OK: {len(slugs_actuales)} programas para {uuid_pc}"
+        )
+    except Exception as e:
+        log_debug(f"Error sincronizando programas instalados: {e}")
 
 def enviar_datos_pc(datos, forzar_completo=False):
     """
@@ -310,7 +372,10 @@ def enviar_datos_pc(datos, forzar_completo=False):
         
         _contadores['sincronizaciones_totales'] += 1
         tiempo_actual = time.time()
-        
+
+        # programas_instalados va a subcolección, nunca al doc principal
+        programas = datos.pop("programas_instalados", None)
+
         # Primera sincronización o forzada → COMPLETA
         if _contadores['sincronizaciones_totales'] == 1 or forzar_completo:
             datos["ultima_sincronizacion"] = firestore.SERVER_TIMESTAMP
@@ -320,6 +385,9 @@ def enviar_datos_pc(datos, forzar_completo=False):
             _contadores['ultima_sync_completa'] = tiempo_actual
             _contadores['ultima_sync_apps'] = tiempo_actual
             _contadores['ultima_sync_errores'] = tiempo_actual
+            if programas is not None:
+                sincronizar_programas_instalados(document_id, programas)
+                _contadores['ultima_sync_programas'] = tiempo_actual
             log_debug(f"Sincronización COMPLETA: {document_id}")
             log_centralizado("Info", "Sync", f"Sincronización COMPLETA: {document_id}")
             return
@@ -367,9 +435,17 @@ def enviar_datos_pc(datos, forzar_completo=False):
                 actualizacion["software_critico"] = datos["software_critico"]
                 _contadores['ultima_sync_software'] = tiempo_actual
                 log_debug("Actualizando software critico")
-                
+
         db.collection(FIREBASE_COLLECTION_NAME).document(document_id).update(actualizacion)
         log_debug(f"Sincronización incremental: {document_id}")
+
+        # Programas instalados cada 60 min → subcolección computadoras/{uuid}/programas
+        if (
+            programas is not None
+            and tiempo_actual - _contadores['ultima_sync_programas'] >= 3600
+        ):
+            sincronizar_programas_instalados(document_id, programas)
+            _contadores['ultima_sync_programas'] = tiempo_actual
 
     except Exception as e:
         log_debug(f"Error enviando datos: {e}")

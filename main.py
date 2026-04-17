@@ -22,6 +22,16 @@ except ImportError:
     RUNNING_AS_SERVICE = False
 
 # --- 3. FUNCIONES DE UTILIDAD ---
+def log_arranque(mensaje):
+    """Escribe al archivo de debug sin depender de Firebase (disponible desde el primer instante)."""
+    try:
+        path = "C:\\agente_debug.txt"
+        ts = time.strftime("%Y-%m-%d %H:%M:%S")
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(f"[{ts}] [ARRANQUE] {mensaje}\n")
+    except:
+        pass
+
 def verificar_permisos_admin():
     try:
         import ctypes
@@ -50,21 +60,34 @@ def servicio_esta_instalado():
 
 def instalar_servicio_automaticamente():
     exe_path = sys.executable
-    subprocess.run('sc stop "AgenteMonitoreo"', shell=True, capture_output=True, 
-                   creationflags=subprocess.CREATE_NO_WINDOW)
+    log_arranque(f"INSTALACION_INICIADA — exe: {exe_path}")
+
+    r_stop = subprocess.run('sc stop "AgenteMonitoreo"', shell=True, capture_output=True,
+                            text=True, encoding='utf-8', errors='replace',
+                            creationflags=subprocess.CREATE_NO_WINDOW)
+    log_arranque(f"SC_STOP — {r_stop.stdout.strip() or r_stop.stderr.strip() or 'sin salida'}")
     time.sleep(1)
-    subprocess.run('sc delete "AgenteMonitoreo"', shell=True, capture_output=True, 
-                   creationflags=subprocess.CREATE_NO_WINDOW)
-    
+
+    r_del = subprocess.run('sc delete "AgenteMonitoreo"', shell=True, capture_output=True,
+                           text=True, encoding='utf-8', errors='replace',
+                           creationflags=subprocess.CREATE_NO_WINDOW)
+    log_arranque(f"SC_DELETE — {r_del.stdout.strip() or r_del.stderr.strip() or 'sin salida'}")
+
     cmd = f'sc create "AgenteMonitoreo" binPath= "{exe_path}" start= auto DisplayName= "AgenteBacar"'
     res = subprocess.run(cmd, shell=True, capture_output=True, text=True,
-                        encoding='utf-8', errors='replace',
-                        creationflags=subprocess.CREATE_NO_WINDOW)
-    
+                         encoding='utf-8', errors='replace',
+                         creationflags=subprocess.CREATE_NO_WINDOW)
+    log_arranque(f"SC_CREATE — returncode: {res.returncode} | stdout: {res.stdout.strip()} | stderr: {res.stderr.strip()}")
+
     if "SUCCESS" in res.stdout or "CORRECTO" in res.stdout:
-        subprocess.run('sc start "AgenteMonitoreo"', shell=True, 
-                      creationflags=subprocess.CREATE_NO_WINDOW)
+        r_start = subprocess.run('sc start "AgenteMonitoreo"', shell=True, capture_output=True,
+                                 text=True, encoding='utf-8', errors='replace',
+                                 creationflags=subprocess.CREATE_NO_WINDOW)
+        log_arranque(f"SC_START — returncode: {r_start.returncode} | stdout: {r_start.stdout.strip()} | stderr: {r_start.stderr.strip()}")
+        log_arranque("INSTALACION_EXITOSA")
         return True
+
+    log_arranque(f"INSTALACION_FALLIDA — SC_CREATE no devolvió SUCCESS/CORRECTO")
     return False
 
 # --- 4. CLASE DEL SERVICIO ---
@@ -86,27 +109,40 @@ if RUNNING_AS_SERVICE:
         def SvcDoRun(self):
             # NOTIFICAR INICIO A WINDOWS INMEDIATAMENTE PARA EVITAR ERROR 1053
             self.ReportServiceStatus(win32service.SERVICE_START_PENDING)
-            
+            log_arranque(f"SVCRUN_INICIO — PID: {os.getpid()}")
+
             try:
-                # Importaciones tardías para no demorar el arranque 
+                # Importaciones tardías para no demorar el arranque
                 from src.database.firebase_client import (
                     enviar_datos_pc,
                     escuchar_comandos_remotos,
                     log_centralizado,
                     log_debug,
+                    registrar_log_actualizacion,
                     reportar_post_actualizacion_agente_si_aplica,
                     set_machine_uuid,
+                    VERSION_AGENTE,
                 )
                 from src.core.scanner import obtener_datos_pc
-                
+                log_arranque("SVCRUN_FIREBASE_OK — módulos cargados")
+
                 # AVISAR QUE YA ESTÁ CORRIENDO
                 self.ReportServiceStatus(win32service.SERVICE_RUNNING)
                 log_debug("Servicio en estado RUNNING.")
-                
+                log_arranque("SVCRUN_RUNNING — servicio activo")
+
                 datos = obtener_datos_pc()
                 set_machine_uuid(datos.get("uuid"))
                 log_centralizado("Info", "Servicio", "AgenteBacar iniciado")
                 reportar_post_actualizacion_agente_si_aplica(datos.get("uuid"))
+                registrar_log_actualizacion(
+                    "ARRANQUE_SERVICIO",
+                    "AgenteBacar iniciado correctamente",
+                    uuid=datos.get("uuid"),
+                    hostname=datos.get("hostname"),
+                    extra={"version": VERSION_AGENTE or "?", "pid": os.getpid()},
+                )
+                log_arranque(f"SVCRUN_SYNC_INICIAL — uuid: {datos.get('uuid')}")
                 enviar_datos_pc(datos)
                 # Evento para despertar el bucle cuando Firebase envíe ACTUALIZAR_AGENTE
                 try:
@@ -190,9 +226,13 @@ if RUNNING_AS_SERVICE:
                     enviar_datos_pc(obtener_datos_pc())
                     
             except Exception as e:
-                from src.database.firebase_client import log_centralizado, log_debug
-                log_debug(f"Error general en SvcDoRun: {e}")
-                log_centralizado("Error", "Servicio", f"Error general en SvcDoRun: {e}", e)
+                log_arranque(f"SVCRUN_ERROR — {type(e).__name__}: {e}")
+                try:
+                    from src.database.firebase_client import log_centralizado, log_debug
+                    log_debug(f"Error general en SvcDoRun: {e}")
+                    log_centralizado("Error", "Servicio", f"Error general en SvcDoRun: {e}", e)
+                except Exception:
+                    pass
 
 # --- 5. PUNTO DE ENTRADA PRINCIPAL ---
 if __name__ == "__main__":
@@ -216,13 +256,18 @@ if __name__ == "__main__":
     # Caso C: Usuario ejecuta el .exe con doble clic
     if not servicio_esta_instalado():
         if not verificar_permisos_admin():
+            log_arranque("CASO_C — sin permisos admin, solicitando elevación")
             solicitar_permisos_admin()
         else:
             if instalar_servicio_automaticamente():
                 print("Servicio instalado y corriendo.")
                 time.sleep(3)
+            else:
+                log_arranque("CASO_C — instalar_servicio_automaticamente() devolvió False")
     else:
-        # Asegurarse de que el servicio esté iniciado
-        subprocess.run('sc start "AgenteMonitoreo"', shell=True, 
-                      creationflags=subprocess.CREATE_NO_WINDOW)
+        log_arranque("CASO_C — servicio ya instalado, ejecutando SC_START")
+        r = subprocess.run('sc start "AgenteMonitoreo"', shell=True, capture_output=True,
+                           text=True, encoding='utf-8', errors='replace',
+                           creationflags=subprocess.CREATE_NO_WINDOW)
+        log_arranque(f"SC_START (ya instalado) — returncode: {r.returncode} | {r.stdout.strip() or r.stderr.strip()}")
         sys.exit(0)

@@ -33,6 +33,12 @@ try:
 except ImportError:
     SOFTWARE_CRITICO_DISPONIBLE = False
 
+try:
+    from src.core.programas_instalados import obtener_programas_instalados
+    PROGRAMAS_INSTALADOS_DISPONIBLE = True
+except ImportError:
+    PROGRAMAS_INSTALADOS_DISPONIBLE = False
+
 # ==================== CACHÉ GLOBAL ====================
 _CACHE_ESTATICO = {}
 
@@ -66,6 +72,58 @@ def _detectar_windows():
         return f"{platform.system()} {platform.release()}"
 
 
+def obtener_windows_version_detallada():
+    """Lee DisplayVersion/UBR/edición del registro (HKLM\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion)."""
+    try:
+        ps_script = (
+            "$k = Get-ItemProperty 'HKLM:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion'; "
+            "[PSCustomObject]@{ "
+            "DisplayVersion = $k.DisplayVersion; "
+            "ReleaseId = $k.ReleaseId; "
+            "CurrentBuild = $k.CurrentBuild; "
+            "UBR = $k.UBR; "
+            "ProductName = $k.ProductName; "
+            "EditionID = $k.EditionID; "
+            "BuildLabEx = $k.BuildLabEx "
+            "} | ConvertTo-Json -Compress"
+        )
+        resultado = subprocess.run(
+            ['powershell', '-NoProfile', '-Command', ps_script],
+            capture_output=True,
+            text=True,
+            encoding='utf-8', errors='replace',
+            timeout=10,
+            creationflags=subprocess.CREATE_NO_WINDOW
+        )
+        if resultado.returncode != 0 or not resultado.stdout.strip():
+            return {}
+        data = json.loads(resultado.stdout)
+        display_version = (data.get('DisplayVersion') or data.get('ReleaseId') or '').strip()
+        build = (data.get('CurrentBuild') or '').strip() if data.get('CurrentBuild') else ''
+        ubr_raw = data.get('UBR')
+        try:
+            ubr = int(ubr_raw) if ubr_raw is not None else None
+        except (TypeError, ValueError):
+            ubr = None
+        edicion = (data.get('ProductName') or '').strip()
+        build_lab = (data.get('BuildLabEx') or '').strip()
+        info = {}
+        if display_version:
+            info['display_version'] = display_version
+        if build:
+            info['build'] = build
+        if ubr is not None:
+            info['ubr'] = ubr
+        if edicion:
+            info['edicion'] = edicion
+        if build_lab:
+            info['build_lab'] = build_lab
+        return info
+    except Exception as e:
+        print(f"⚠️ No se pudo obtener windows_version_detallada: {e}")
+        return {}
+
+
 def inicializar_cache():
     """Cachea datos que nunca cambian (se llama 1 vez al inicio)"""
     global _CACHE_ESTATICO
@@ -77,9 +135,10 @@ def inicializar_cache():
             'procesador': platform.processor(),
             'nucleos_fisicos': psutil.cpu_count(logical=False),
             'ram_total_gb': round(psutil.virtual_memory().total / (1024 ** 3), 2),
-            'modelos_discos': obtener_modelos_discos_fisicos(),  # Cacheamos modelos
-            'tipos_discos': obtener_tipos_discos_fisicos(),  # SSD / HDD
+            'info_discos': obtener_info_discos_fisicos(),      # modelo + tipo por DeviceId
+            'mapa_particiones': obtener_mapa_particiones(),    # letra → número disco
             'modulos_ram': obtener_modulos_ram(),
+            'windows_version_detallada': obtener_windows_version_detallada(),
         }
     return _CACHE_ESTATICO
 
@@ -125,102 +184,66 @@ def obtener_modulos_ram():
     return modulos
 
 
-def obtener_tipos_discos_fisicos():
-    """Obtiene el tipo de cada disco físico (SSD/HDD) usando Get-PhysicalDisk"""
-    tipos = {}
+def obtener_info_discos_fisicos():
+    """Modelos y tipos de discos físicos via Get-PhysicalDisk (funciona en Win10/11 sin wmic)."""
+    info = {}
     try:
         resultado = subprocess.run(
-            ['powershell', '-Command',
-             'Get-PhysicalDisk | Select-Object DeviceId, MediaType | ConvertTo-Json'],
+            ['powershell', '-NoProfile', '-Command',
+             'Get-PhysicalDisk | Select-Object DeviceId, FriendlyName, MediaType | ConvertTo-Json'],
             capture_output=True,
             text=True,
             encoding='utf-8', errors='replace',
             timeout=10,
             creationflags=subprocess.CREATE_NO_WINDOW
         )
-
-        import json
-        data = json.loads(resultado.stdout.strip())
-        if isinstance(data, dict):
-            data = [data]
-        for disco in data:
-            device_id = str(disco.get('DeviceId', '')).strip()
-            media_type = str(disco.get('MediaType', '')).strip()
-            if media_type in ('SSD', 'HDD'):
-                tipos[device_id] = media_type
-            else:
-                tipos[device_id] = 'Desconocido'
+        if resultado.returncode == 0 and resultado.stdout.strip():
+            data = json.loads(resultado.stdout.strip())
+            if isinstance(data, dict):
+                data = [data]
+            for disco in data:
+                device_id = str(disco.get('DeviceId', '')).strip()
+                media_type = str(disco.get('MediaType', '')).strip()
+                modelo = (disco.get('FriendlyName') or '').strip() or 'Desconocido'
+                tipo = media_type if media_type in ('SSD', 'HDD') else 'Desconocido'
+                info[device_id] = {'modelo': modelo, 'tipo': tipo}
     except Exception as e:
-        print(f"⚠️ No se pudo obtener tipos de discos: {e}")
+        print(f"⚠️ No se pudo obtener info de discos físicos: {e}")
+    return info
 
-    return tipos
 
-
-def obtener_modelos_discos_fisicos():
-    """Obtiene los modelos de los discos físicos usando WMIC (se ejecuta 1 vez)"""
-    modelos = {}
+def obtener_mapa_particiones():
+    """Mapeo letra_unidad→número_disco via Get-Partition (reemplaza wmic assoc)."""
+    mapa = {}
     try:
         resultado = subprocess.run(
-            ['wmic', 'diskdrive', 'get', 'Index,Model'],
+            ['powershell', '-NoProfile', '-Command',
+             'Get-Partition | Where-Object { $_.DriveLetter } | Select-Object DriveLetter, DiskNumber | ConvertTo-Json'],
             capture_output=True,
             text=True,
             encoding='utf-8', errors='replace',
             timeout=10,
             creationflags=subprocess.CREATE_NO_WINDOW
         )
-        
-        lineas = resultado.stdout.strip().split('\n')[1:]
-        
-        for linea in lineas:
-            linea = linea.strip()
-            if linea:
-                partes = linea.split(None, 1)
-                if len(partes) == 2:
-                    indice = partes[0].strip()
-                    modelo = partes[1].strip()
-                    modelos[indice] = modelo
-                    
+        if resultado.returncode == 0 and resultado.stdout.strip():
+            data = json.loads(resultado.stdout.strip())
+            if isinstance(data, dict):
+                data = [data]
+            for p in data:
+                letra = str(p.get('DriveLetter') or '').strip().upper()
+                disco_num = str(p.get('DiskNumber', '')).strip()
+                if letra and disco_num:
+                    mapa[letra] = disco_num
     except Exception as e:
-        print(f"⚠️ No se pudo obtener modelos de discos: {e}")
-    
-    return modelos
-
-
-def obtener_disco_de_particion(letra_unidad):
-    """Obtiene el número de disco físico de una letra de unidad"""
-    try:
-        letra = letra_unidad.replace(':', '').replace('\\', '').strip()
-        
-        resultado = subprocess.run(
-            ['wmic', 'logicaldisk', 'where', f'DeviceID="{letra}:"', 'assoc', '/assocclass:Win32_LogicalDiskToPartition'],
-            capture_output=True,
-            text=True,
-            encoding='utf-8', errors='replace',
-            timeout=10,
-            creationflags=subprocess.CREATE_NO_WINDOW
-        )
-        
-        for linea in resultado.stdout.split('\n'):
-            if 'Disk #' in linea:
-                try:
-                    disk_num = linea.split('Disk #')[1].split(',')[0].strip()
-                    return disk_num
-                except:
-                    pass
-        
-        return "0"  # Fallback
-            
-    except Exception as e:
-        print(f"⚠️ Error obteniendo disco de partición {letra_unidad}: {e}")
-    
-    return None
+        print(f"⚠️ No se pudo obtener mapa de particiones: {e}")
+    return mapa
 
 
 def obtener_salud_discos():
-    """Obtiene información de espacio en disco usando caché de modelos"""
+    """Obtiene información de espacio en disco usando caché de modelos."""
     cache = inicializar_cache()
-    modelos_discos = cache['modelos_discos']
-    tipos_discos = cache['tipos_discos']
+    info_discos = cache['info_discos']
+    mapa_particiones = cache['mapa_particiones']
 
     discos = []
     for partition in psutil.disk_partitions():
@@ -230,10 +253,11 @@ def obtener_salud_discos():
         try:
             uso = psutil.disk_usage(partition.mountpoint)
 
-            letra = partition.device
-            disco_index = obtener_disco_de_particion(letra)
-            modelo = modelos_discos.get(disco_index, "Desconocido") if disco_index else "Desconocido"
-            tipo = tipos_discos.get(disco_index, "Desconocido") if disco_index else "Desconocido"
+            letra = partition.device.replace(':', '').replace('\\', '').strip().upper()
+            disco_index = mapa_particiones.get(letra)
+            disco_info = info_discos.get(disco_index, {}) if disco_index is not None else {}
+            modelo = disco_info.get('modelo', 'Desconocido')
+            tipo = disco_info.get('tipo', 'Desconocido')
 
             discos.append({
                 "dispositivo": partition.device,
@@ -248,7 +272,7 @@ def obtener_salud_discos():
             })
         except PermissionError:
             continue
-    
+
     return discos
 
 
@@ -758,6 +782,7 @@ def obtener_datos_pc(incluir_pesados=True):
         "nucleos_fisicos": cache['nucleos_fisicos'],
         "ram_total_gb": cache['ram_total_gb'],
         "modulos_ram": cache['modulos_ram'],
+        "windows_version_detallada": cache.get('windows_version_detallada') or {},
         
         # Datos dinámicos ligeros
         "cpu_uso_porcentaje": psutil.cpu_percent(interval=0.5),  # REDUCIDO DE 1 A 0.5
@@ -786,6 +811,9 @@ def obtener_datos_pc(incluir_pesados=True):
 
         if SOFTWARE_CRITICO_DISPONIBLE:
             datos["software_critico"] = obtener_software_critico()
+
+        if PROGRAMAS_INSTALADOS_DISPONIBLE:
+            datos["programas_instalados"] = obtener_programas_instalados()
 
     # Liberar memoria final
     gc.collect()

@@ -17,6 +17,7 @@ Agente de monitoreo IT para Windows. Se instala como servicio del sistema, recop
 
 #### Datos estáticos (una vez al inicio)
 - Hostname, sistema operativo y arquitectura
+- **Versión detallada de Windows** (`windows_version_detallada`: `display_version` como `23H2`, `build`, `ubr`, `edicion`, `build_lab`) leída del registro `HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion`
 - Modelo de procesador y cantidad de núcleos físicos
 - RAM total (GB) y módulos físicos (fabricante, modelo, capacidad, velocidad MHz)
 - Modelos de discos físicos
@@ -38,6 +39,7 @@ Agente de monitoreo IT para Windows. Se instala como servicio del sistema, recop
 | Periféricos conectados | 30 min |
 | Windows Updates pendientes e historial | 30 min |
 | Software crítico (browsers, Office, antivirus) | 60 min |
+| Programas instalados (registro Windows, subcolección `computadoras/{uuid}/programas`) | 60 min |
 | IP pública y AnyDesk ID | Solo en primera sync |
 
 ### Detección de periféricos
@@ -122,6 +124,7 @@ El script **une** `computadoras` y `tareas` por UUID. Si **`version_agente`** co
 - **Syncs posteriores**: actualizaciones incrementales con `.update()`, solo los campos modificados según su frecuencia
 - **Colecciones usadas**:
   - `computadoras` — datos de cada PC (ID = UUID del motherboard)
+  - `computadoras/{uuid}/programas` — subcolección con un doc por programa instalado (ID = slug del nombre + hash corto). Campos: `nombre`, `version`, `publisher`, `fecha_instalacion` (YYYY-MM-DD), `arquitectura` (`x64` / `x86` / `user`), `ultima_vez_visto`. Se refresca cada 60 min; los programas desinstalados se borran en el siguiente sync.
   - `tareas` — comandos remotos por UUID
   - `config/agente_hw` — URL del `.exe` para **ACTUALIZAR_AGENTE** (y opcionalmente `version` sin `v`, informativa)
   - `config/agente` — espejo opcional de solo `url` (compatibilidad; `set_agente_url` y el workflow lo mantienen al actualizar)
@@ -160,7 +163,8 @@ MiniAgente/
 │   │   ├── perifericos.py       # Detección de periféricos USB, monitores, audio
 │   │   ├── auto_update.py       # Mecanismo de auto-actualización
 │   │   ├── windows_updates.py   # Gestión de Windows Updates
-│   │   └── software_critico.py  # Detección de browsers, Office, antivirus
+│   │   ├── software_critico.py  # Detección de browsers, Office, antivirus
+│   │   └── programas_instalados.py  # Listado de programas desde el registro (Uninstall keys)
 │   └── database/
 │       └── firebase_client.py   # Integración con Firestore, comandos remotos
 ├── auth/
@@ -238,8 +242,32 @@ python -c "import base64; print(base64.b64encode(open('auth/serviceAccountKey.js
 
 | Archivo | Contenido |
 |---------|-----------|
-| `C:\agente_debug.txt` | Operaciones de Firebase y errores |
+| `C:\agente_debug.txt` | Operaciones de Firebase, errores y **logs de arranque/instalación** (prefijo `[ARRANQUE]`) |
 | `C:\agente_actualizaciones.jsonl` | Historial de todos los comandos remotos ejecutados (JSON Lines, un evento por línea) |
+
+### Secuencia de logs de arranque en `agente_debug.txt`
+
+Instalación exitosa (doble clic):
+```
+[ARRANQUE] INSTALACION_INICIADA — exe: C:\...\AgenteBacar.exe
+[ARRANQUE] SC_STOP — ...
+[ARRANQUE] SC_DELETE — ...
+[ARRANQUE] SC_CREATE — returncode: 0 | stdout: [SC] CreateService CORRECTO.
+[ARRANQUE] SC_START — returncode: 0 | ...
+[ARRANQUE] INSTALACION_EXITOSA
+[ARRANQUE] SVCRUN_INICIO — PID: 1234
+[ARRANQUE] SVCRUN_FIREBASE_OK — módulos cargados
+[ARRANQUE] SVCRUN_RUNNING — servicio activo
+[ARRANQUE] SVCRUN_SYNC_INICIAL — uuid: ...
+```
+
+Si falla antes de Firebase (credenciales, archivo faltante, etc.):
+```
+[ARRANQUE] SVCRUN_INICIO — PID: 1234
+[ARRANQUE] SVCRUN_ERROR — FileNotFoundError: ...
+```
+
+El evento `ARRANQUE_SERVICIO` también queda en Firestore → colección `logs_actualizaciones`.
 
 ---
 

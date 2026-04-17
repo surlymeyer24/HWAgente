@@ -642,7 +642,15 @@ def obtener_dispositivos_usb():
     try:
         ps_script = """
         Get-PnpDevice -PresentOnly |
-        Where-Object {($_.InstanceId -like "*USB*" -or $_.InstanceId -like "BTHENUM*" -or $_.InstanceId -like "BTH\\*" -or $_.InstanceId -like "BTHHID*") -and $_.Status -eq "OK"} |
+        Where-Object {
+            $_.Status -eq "OK" -and (
+                $_.InstanceId -like "*USB*" -or
+                $_.InstanceId -like "BTHENUM*" -or
+                $_.InstanceId -like "BTH\\*" -or
+                $_.InstanceId -like "BTHHID*" -or
+                ($_.InstanceId -like "HID\\VID_*" -and $_.Class -in @('Keyboard','Mouse'))
+            )
+        } |
         Select-Object FriendlyName, Class, Manufacturer, InstanceId |
         ConvertTo-Json
         """
@@ -719,6 +727,23 @@ def obtener_dispositivos_usb():
             mouses = [d for d in dispositivos if d.get('_hid_tipo') == 'mouse']
             otros_hid = [d for d in dispositivos if d.get('_hid_tipo') == 'otro_hid']
             otros = [d for d in dispositivos if d.get('_hid_tipo') is None]
+
+            # Limpiar otros_hid: eliminar entradas cuyo VID+PID ya aparece
+            # en un teclado o mouse detectado (son la misma pieza física
+            # expuesta en distinto nivel PnP: USB\... HIDClass vs HID\... Keyboard/Mouse)
+            if (teclados or mouses) and otros_hid:
+                vid_pids_km: set[tuple[str | None, str | None]] = set()
+                for d in teclados + mouses:
+                    iid = d.get('_instance_id', '')
+                    vp = (_extraer_vid(iid), _extraer_pid(iid))
+                    if vp[0] and vp[1]:
+                        vid_pids_km.add(vp)
+                if vid_pids_km:
+                    otros_hid = [
+                        d for d in otros_hid
+                        if (_extraer_vid(d.get('_instance_id', '')),
+                            _extraer_pid(d.get('_instance_id', ''))) not in vid_pids_km
+                    ]
 
             # Fallback: si hay HID ambiguos pero no se detectó teclado ni mouse,
             # asumir 1ro=teclado, 2do=mouse (combinación más común)
