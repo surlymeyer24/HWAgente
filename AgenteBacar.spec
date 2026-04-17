@@ -72,6 +72,7 @@ a = Analysis(
         'src.core.scanner',
         'src.core.windows_updates',
         'src.core.software_critico',
+        'src.core.programas_instalados',
         'src.core.auto_update',
         'src.database.firebase_client',
         'src.core.exe_version',
