@@ -125,6 +125,20 @@ def resolver_machine_id(uuid_hardware: str, hostname: str) -> str:
     # 1. Registro local — fuente de verdad para arranques posteriores
     id_local = _leer_machine_id_registro()
     if id_local:
+        try:
+            doc = db.collection(FIREBASE_COLLECTION_NAME).document(id_local).get()
+            if doc.exists:
+                hostname_existente = (doc.to_dict() or {}).get("hostname", "")
+                if hostname_existente and hostname_existente.lower() != hostname.lower():
+                    log_debug(
+                        f"resolver_machine_id: ID del registro ({id_local}) pertenece a "
+                        f"'{hostname_existente}', no a '{hostname}'. Re-evaluando colisión."
+                    )
+                    id_local = None
+        except Exception as e:
+            log_debug(f"resolver_machine_id: error validando ID del registro ({e}). Usando registro.")
+
+    if id_local:
         log_debug(f"resolver_machine_id: ID del registro → {id_local}")
         return id_local
 
