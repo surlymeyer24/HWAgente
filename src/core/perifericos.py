@@ -458,8 +458,6 @@ _FABRICANTES_GENERICOS = {
 }
 
 
-# Palabras clave que identifican receptores inalámbricos USB (dongles).
-# Incluye inglés y español (Windows localizado) y marcas comunes (Logitech Bolt, Lightspeed, etc.).
 # PIDs USB de receptores Logitech (Unifying, Nano, Lightspeed, Bolt, etc.).
 # Fuente: Solaar lib/logitech_receiver/base_usb.py — mismos IDs que el driver Linux hid-logitech-dj.
 _LOGITECH_RECEIVER_PIDS = frozenset({
@@ -468,17 +466,46 @@ _LOGITECH_RECEIVER_PIDS = frozenset({
     'C545', 'C547', 'C548', 'C54D',
 })
 
+# PIDs de receptores inalámbricos de otras marcas comunes (VID → set de PIDs).
+# Microsoft Nano Transceiver / Wireless Desktop receivers (VID 045E).
+# Rapoo wireless receivers (VID 24AE).
+# A4Tech wireless receivers (VID 09DA).
+_OTROS_RECEPTORES_PIDS: dict[str, frozenset] = {
+    '045E': frozenset({  # Microsoft
+        '0745', '0750', '0752', '07A5', '07B2', '0800', '082A', '0922',
+        '09B0', '09BA', '09BB', '09BC', '0990', '0991',
+    }),
+    '24AE': frozenset({  # Rapoo
+        '2000', '2001', '2002', '2003', '2004', '2005', '2010', '2011',
+        '2012', '2013', '2014', '2015', '2017', '2018',
+    }),
+    '09DA': frozenset({  # A4Tech
+        '9066', '9090', '9033', '90C0', '90C4', 'F613', 'F624',
+    }),
+}
+
+# Palabras clave que identifican receptores inalámbricos USB (dongles).
+# Incluye inglés, español (Windows localizado) y variantes de marcas comunes.
 _RECEPTOR_KEYWORDS = [
-    'unifying',  # "Logitech Unifying" sin la palabra "receiver"
-    'receiver', 'unifying receiver', 'nano receiver',
-    '2.4g wireless', 'usb wireless', 'wireless usb',
-    'rf receiver', 'transceiver', 'wireless receiver',
-    'dongle', 'usb dongle', 'wireless dongle',
+    # Logitech
+    'unifying', 'unifying receiver', 'nano receiver',
     'lightspeed', 'logi bolt', 'bolt receiver',
+    # Genéricos inglés
+    'receiver', 'wireless receiver', 'rf receiver', 'nano transceiver',
+    'transceiver', 'usb receiver', 'nano usb', '2.4g receiver',
+    'wireless adapter', 'wireless dongle', 'usb dongle', 'dongle',
+    'wireless usb', 'usb wireless', '2.4g wireless',
+    # Genéricos español
     'receptor', 'receptor usb', 'usb receptor', 'receptor inalambrico',
-    'receptor nano', 'receptor rf',
+    'receptor nano', 'receptor rf', 'receptor inalambrico usb',
     'inalambrico', 'dispositivo inalambrico', 'usb inalambrico',
+    'adaptador inalambrico',
+    # Frecuencias (aplica a dongles que Windows nombra así)
     '2.4ghz', '2,4ghz', '2.4 ghz', '2,4 ghz',
+    # Microsoft
+    'nano transceiver v', 'wireless desktop receiver',
+    # Rapoo
+    'rapoo receiver', 'rapoo wireless',
 ]
 
 
@@ -501,11 +528,23 @@ def _extraer_pid(instance_id: str) -> str | None:
 
 
 def _es_logitech_receptor_por_pid(instance_id: str) -> bool:
-    """True si el InstanceId corresponde a un receptor inalámbrico Logitech (mismo PID en interfaces HID del composite)."""
+    """True si el InstanceId corresponde a un receptor inalámbrico Logitech."""
     if _extraer_vid(instance_id) != '046D':
         return False
     pid = _extraer_pid(instance_id)
     return bool(pid and pid in _LOGITECH_RECEIVER_PIDS)
+
+
+def _es_otro_receptor_por_pid(instance_id: str) -> bool:
+    """True si el InstanceId corresponde a un receptor inalámbrico de Microsoft, Rapoo o A4Tech."""
+    vid = _extraer_vid(instance_id)
+    if not vid:
+        return False
+    pids_marca = _OTROS_RECEPTORES_PIDS.get(vid)
+    if not pids_marca:
+        return False
+    pid = _extraer_pid(instance_id)
+    return bool(pid and pid in pids_marca)
 
 
 def _conexion_por_nombre_dispositivo(nombre: str) -> str | None:
@@ -537,30 +576,45 @@ def _conexion_por_nombre_dispositivo(nombre: str) -> str | None:
     return None
 
 
+_BUS_DESC_INALAMBRICO = (
+    'wireless', 'inalambrico', '2.4g', '2.4ghz', 'rf keyboard', 'rf mouse',
+    'wireless keyboard', 'wireless mouse', 'wireless combo',
+)
+
+
 def _inferir_conexion(
-    instance_id: str, vids_receptores: set | None = None, nombre_dispositivo: str = ""
+    instance_id: str,
+    vids_receptores: set | None = None,
+    nombre_dispositivo: str = "",
+    bus_desc: str = "",
 ) -> str:
     """
     Determina el tipo de conexión a partir del InstanceId del dispositivo.
 
     Retorna:
-      'bluetooth'      — dispositivo Bluetooth (InstanceId empieza con BTHENUM/BTH/BTHHID)
-      'inalambrico_usb'— dongle inalámbrico USB (VID coincide con un receptor detectado)
-                         o nombre PnP indica kit inalámbrico
-      'usb'            — USB cableado (o sin información suficiente)
+      'bluetooth'       — InstanceId empieza con BTHENUM/BTH/BTHHID
+      'inalambrico_usb' — PID de receptor conocido, VID compartido con dongle,
+                          BusReportedDeviceDescription indica inalámbrico,
+                          o nombre PnP indica kit inalámbrico
+      'usb'             — USB cableado (o sin información suficiente)
     """
     if not instance_id:
         return _conexion_por_nombre_dispositivo(nombre_dispositivo) or "usb"
     upper = instance_id.upper()
     if upper.startswith(("BTHENUM\\", "BTH\\", "BTHHID\\")):
         return "bluetooth"
-    # Logitech: teclado/ratón vía dongle comparten VID+PID del receptor (p. ej. C52B); el dongle suele llamarse
-    # "USB Input Device" y no matchea por nombre.
     if _es_logitech_receptor_por_pid(instance_id):
+        return "inalambrico_usb"
+    if _es_otro_receptor_por_pid(instance_id):
         return "inalambrico_usb"
     if vids_receptores:
         vid = _extraer_vid(instance_id)
         if vid and vid in vids_receptores:
+            return "inalambrico_usb"
+    # BusReportedDeviceDescription — fuente más fiable para genéricos sin nombre reconocible
+    if bus_desc:
+        bus_norm = _normalizar_para_comparacion(bus_desc)
+        if any(kw in bus_norm for kw in _BUS_DESC_INALAMBRICO):
             return "inalambrico_usb"
     por_nombre = _conexion_por_nombre_dispositivo(nombre_dispositivo)
     if por_nombre:
@@ -665,7 +719,7 @@ def obtener_dispositivos_usb():
     
     try:
         ps_script = """
-        Get-PnpDevice -PresentOnly |
+        $devs = Get-PnpDevice -PresentOnly |
         Where-Object {
             $_.Status -eq "OK" -and (
                 $_.InstanceId -like "*USB*" -or
@@ -674,9 +728,23 @@ def obtener_dispositivos_usb():
                 $_.InstanceId -like "BTHHID*" -or
                 ($_.InstanceId -like "HID\\VID_*" -and $_.Class -in @('Keyboard','Mouse'))
             )
-        } |
-        Select-Object FriendlyName, Class, Manufacturer, InstanceId |
-        ConvertTo-Json
+        }
+        $devs | ForEach-Object {
+            $busDesc = ''
+            try {
+                $prop = Get-PnpDeviceProperty -InstanceId $_.InstanceId `
+                    -KeyName 'DEVPKEY_Device_BusReportedDeviceDescription' `
+                    -ErrorAction SilentlyContinue
+                if ($prop) { $busDesc = [string]$prop.Data }
+            } catch {}
+            [PSCustomObject]@{
+                FriendlyName = $_.FriendlyName
+                Class        = $_.Class
+                Manufacturer = $_.Manufacturer
+                InstanceId   = $_.InstanceId
+                BusDesc      = $busDesc
+            }
+        } | ConvertTo-Json
         """
         
         resultado = subprocess.run(
@@ -699,6 +767,7 @@ def obtener_dispositivos_usb():
                 fabricante = dispositivo.get('Manufacturer', '')
                 clase = dispositivo.get('Class', 'Otro')
                 instance_id = dispositivo.get('InstanceId', '')
+                bus_desc = dispositivo.get('BusDesc', '') or ''
 
                 # Excluir infraestructura interna
                 if _es_dispositivo_excluido(nombre):
@@ -734,6 +803,7 @@ def obtener_dispositivos_usb():
                     'clase': clase,
                     '_hid_tipo': hid_tipo,
                     '_instance_id': instance_id,
+                    '_bus_desc': bus_desc,
                 })
 
             # Detectar receptores inalámbricos USB y recolectar sus VIDs
@@ -790,6 +860,7 @@ def obtener_dispositivos_usb():
                         t0.get('_instance_id', ''),
                         vids_receptores,
                         t0.get('nombre', ''),
+                        t0.get('_bus_desc', ''),
                     ),
                 })
             if mouses:
@@ -804,6 +875,7 @@ def obtener_dispositivos_usb():
                         m0.get('_instance_id', ''),
                         vids_receptores,
                         m0.get('nombre', ''),
+                        m0.get('_bus_desc', ''),
                     ),
                 })
             if otros_hid:
@@ -819,6 +891,7 @@ def obtener_dispositivos_usb():
             for d in otros:
                 d.pop('_hid_tipo', None)
                 d.pop('_instance_id', None)
+                d.pop('_bus_desc', None)
             dispositivos = otros
             
             # Ordenar: primero por categoría, luego por nombre
