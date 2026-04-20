@@ -959,54 +959,183 @@ def formatear_dispositivos_usb(dispositivos: list, usar_emoji: bool = False) -> 
 
 
 # ==================== DISPOSITIVOS DE AUDIO ====================
+
+# EndpointFormFactor values (Windows SDK / MMDeviceAPI)
+_AUDIO_FORM_FACTOR: dict[int, str] = {
+    0: 'otro',                  # RemoteNetworkDevice
+    1: 'parlante',              # Speakers
+    2: 'linea',                 # LineLevel
+    3: 'auricular',             # Headphones
+    4: 'microfono',             # Microphone
+    5: 'auricular_microfono',   # Headset
+    6: 'handset',               # Handset
+    7: 'digital',               # UnknownDigitalPassthrough
+    8: 'digital',               # SPDIF
+    9: 'hdmi',                  # DigitalAudioDisplayDevice (HDMI/DP)
+    10: 'desconocido',          # UnknownFormFactor
+}
+
+# Palabras clave de drivers integrados → no son la marca del producto
+_DRIVERS_INTEGRADOS = {
+    'realtek', 'idt', 'conexant', 'intel', 'nvidia', 'amd',
+    'high definition audio', 'hd audio', 'hdaudio', 'via audio',
+    'cirrus logic', 'c-media', 'creative', 'sigmatel',
+}
+
+# Marcas de audio reconocibles que pueden aparecer en el nombre del endpoint
+_MARCAS_AUDIO = [
+    'jabra', 'sony', 'bose', 'jbl', 'sennheiser', 'beyerdynamic',
+    'audio-technica', 'shure', 'plantronics', 'poly', 'logitech',
+    'hyperx', 'steelseries', 'razer', 'corsair', 'turtle beach',
+    'astro', 'skullcandy', 'beats', 'apple', 'samsung', 'lg',
+    'harman', 'akg', 'focusrite', 'm-audio', 'edifier', 'marshall',
+    'anker', 'soundcore', 'cooler master', 'rode', 'blue',
+    'elgato', 'dell', 'hp', 'lenovo', 'asus', 'msi',
+]
+
+
+def _extraer_marca_audio(nombre: str) -> str:
+    """Extrae la marca de un endpoint de audio a partir de su nombre amigable."""
+    if not nombre:
+        return '—'
+    n = nombre.lower()
+    # Detectar si es audio integrado del driver
+    if any(d in n for d in _DRIVERS_INTEGRADOS):
+        return 'Integrado'
+    # Buscar marca conocida en el nombre
+    for marca in _MARCAS_AUDIO:
+        if marca in n:
+            # Devolver con capitalización original del nombre
+            idx = n.index(marca)
+            return nombre[idx: idx + len(marca)].title()
+    return '—'
+
+
+def _fabricante_audio_por_vid(parent_instance_id: str) -> str | None:
+    """
+    Resuelve el fabricante de un endpoint de audio a partir del VID
+    del dispositivo padre (USB) usando el mismo diccionario que los periféricos USB.
+    Retorna None si el padre no es USB o el VID no está en el diccionario.
+    """
+    if not parent_instance_id:
+        return None
+    upper = parent_instance_id.upper()
+    # Solo aplica a dispositivos USB; BT y audio integrado tienen otro prefijo
+    if 'VID_' not in upper:
+        return None
+    return _resolver_fabricante_por_vid(parent_instance_id)
+
+
 def obtener_dispositivos_audio():
-    """Obtiene dispositivos de audio (micrófonos, altavoces, etc.)"""
+    """Obtiene dispositivos de audio con tipo (parlante/auricular/etc.) y marca."""
     dispositivos_audio = {
-        'entrada': [],  # Micrófonos
-        'salida': []    # Altavoces/Auriculares
+        'entrada': [],
+        'salida': [],
     }
-    
+
     try:
-        # Dispositivos de grabación (entrada)
-        ps_entrada = """
-        Get-WmiObject Win32_SoundDevice | 
-        Where-Object {$_.Status -eq "OK"} |
-        Select-Object Name, Manufacturer, Status | 
-        ConvertTo-Json
+        # Consulta MMDEVAPI: endpoints reales con FormFactor + dispositivo padre
+        # InstanceId {0.0.0...} = render (salida), {0.0.1...} = capture (entrada)
+        # DEVPKEY_Device_Parent = {4340A6C5-93FA-4706-972C-7B648008A5A7} 8
+        # DEVPKEY_AudioEndpoint_FormFactor = {1DA5D803-D492-4EDD-8C23-E0C0FFEE7F0E} 0
+        ps_script = """
+        $devs = Get-PnpDevice -PresentOnly |
+            Where-Object { $_.InstanceId -like "SWD\\MMDEVAPI*" -and $_.Status -eq "OK" }
+        $devs | ForEach-Object {
+            $ff = $null
+            $parent = $null
+            try {
+                $prop = Get-PnpDeviceProperty -InstanceId $_.InstanceId `
+                    -KeyName '{1DA5D803-D492-4EDD-8C23-E0C0FFEE7F0E} 0' `
+                    -ErrorAction SilentlyContinue
+                if ($prop -and $prop.Data -ne $null) { $ff = [int]$prop.Data }
+            } catch {}
+            try {
+                $p = Get-PnpDeviceProperty -InstanceId $_.InstanceId `
+                    -KeyName '{4340A6C5-93FA-4706-972C-7B648008A5A7} 8' `
+                    -ErrorAction SilentlyContinue
+                if ($p) { $parent = [string]$p.Data }
+            } catch {}
+            [PSCustomObject]@{
+                Name       = $_.FriendlyName
+                IsRender   = ($_.InstanceId -like "*{0.0.0.*")
+                FormFactor = $ff
+                Parent     = $parent
+            }
+        } | ConvertTo-Json
         """
-        
+
         resultado = subprocess.run(
-            ['powershell', '-NoProfile', '-Command', ps_entrada],
+            ['powershell', '-NoProfile', '-Command', ps_script],
             capture_output=True,
             text=True,
             encoding='utf-8', errors='replace',
-            timeout=8,
+            timeout=12,
             creationflags=subprocess.CREATE_NO_WINDOW
         )
-        
+
         if resultado.returncode == 0 and resultado.stdout.strip():
             datos = json.loads(resultado.stdout)
-            
             if isinstance(datos, dict):
                 datos = [datos]
-            
-            for dispositivo in datos:
+
+            for d in datos:
+                nombre = (d.get('Name') or '').strip() or 'Dispositivo de audio'
+                ff = d.get('FormFactor')
+                is_render = d.get('IsRender', True)
+                parent_id = d.get('Parent') or ''
+
+                tipo = _AUDIO_FORM_FACTOR.get(ff, 'desconocido') if ff is not None else 'desconocido'
+
+                # Prioridad de marca: VID del padre USB → parseo del nombre
+                marca = _fabricante_audio_por_vid(parent_id) or _extraer_marca_audio(nombre)
+
                 info = {
-                    'nombre': dispositivo.get('Name', 'Desconocido'),
-                    'fabricante': dispositivo.get('Manufacturer', 'Desconocido'),
-                    'estado': 'Activo' if dispositivo.get('Status') == 'OK' else 'Inactivo'
+                    'nombre': nombre,
+                    'fabricante': marca,
+                    'tipo': tipo,
+                    'estado': 'Activo',
                 }
-                
-                # Clasificar en entrada o salida basado en el nombre
-                nombre_lower = info['nombre'].lower()
-                if any(palabra in nombre_lower for palabra in ['microphone', 'mic', 'input', 'recording']):
-                    dispositivos_audio['entrada'].append(info)
-                else:
+
+                if is_render:
                     dispositivos_audio['salida'].append(info)
-                    
+                else:
+                    dispositivos_audio['entrada'].append(info)
+
     except Exception as e:
         print(f"⚠️ Error obteniendo dispositivos de audio: {e}")
-    
+        # Fallback: Win32_SoundDevice (sin tipo ni marca precisa)
+        try:
+            ps_fallback = """
+            Get-WmiObject Win32_SoundDevice |
+            Where-Object {$_.Status -eq "OK"} |
+            Select-Object Name, Manufacturer | ConvertTo-Json
+            """
+            r2 = subprocess.run(
+                ['powershell', '-NoProfile', '-Command', ps_fallback],
+                capture_output=True, text=True,
+                encoding='utf-8', errors='replace',
+                timeout=8, creationflags=subprocess.CREATE_NO_WINDOW
+            )
+            if r2.returncode == 0 and r2.stdout.strip():
+                datos2 = json.loads(r2.stdout)
+                if isinstance(datos2, dict):
+                    datos2 = [datos2]
+                for d in datos2:
+                    nombre = d.get('Name', 'Desconocido')
+                    info = {
+                        'nombre': nombre,
+                        'fabricante': _extraer_marca_audio(nombre),
+                        'tipo': 'desconocido',
+                        'estado': 'Activo',
+                    }
+                    if any(w in nombre.lower() for w in ('microphone', 'mic', 'input', 'recording')):
+                        dispositivos_audio['entrada'].append(info)
+                    else:
+                        dispositivos_audio['salida'].append(info)
+        except Exception:
+            pass
+
     return dispositivos_audio
 
 
