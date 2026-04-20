@@ -139,6 +139,7 @@ def inicializar_cache():
             'mapa_particiones': obtener_mapa_particiones(),    # letra → número disco
             'modulos_ram': obtener_modulos_ram(),
             'windows_version_detallada': obtener_windows_version_detallada(),
+            'tipo_equipo': obtener_tipo_equipo(),
         }
     return _CACHE_ESTATICO
 
@@ -751,6 +752,68 @@ def obtener_usuarios():
         return {"usuario_actual": "Desconocido", "usuarios_activos": []}
 
 
+_CHASSIS_NOTEBOOK = {8, 9, 10, 11, 14}
+_CHASSIS_TABLET   = {30, 31, 32}
+_CHASSIS_DESKTOP  = {3, 4, 5, 6, 7, 15, 16}
+_CHASSIS_ALLINONE = {13}
+_CHASSIS_SERVIDOR = {17, 22, 23, 25}
+
+
+def obtener_tipo_equipo() -> dict:
+    """Detecta tipo de chasis via Win32_SystemEnclosure + Win32_Battery como señal secundaria."""
+    ps_script = (
+        "$enc = Get-WmiObject Win32_SystemEnclosure | Select-Object -First 1; "
+        "$bat = Get-WmiObject Win32_Battery | Select-Object -First 1; "
+        "[PSCustomObject]@{ ChassisTypes = $enc.ChassisTypes; HasBattery = ($bat -ne $null) } "
+        "| ConvertTo-Json -Compress"
+    )
+    try:
+        resultado = subprocess.run(
+            ['powershell', '-NoProfile', '-Command', ps_script],
+            capture_output=True, text=True,
+            encoding='utf-8', errors='replace',
+            timeout=10, creationflags=subprocess.CREATE_NO_WINDOW
+        )
+        if resultado.returncode == 0 and resultado.stdout.strip():
+            data = json.loads(resultado.stdout)
+            raw = data.get('ChassisTypes')
+            tiene_bateria = bool(data.get('HasBattery', False))
+
+            # ChassisTypes puede llegar como int, lista o None
+            if isinstance(raw, int):
+                chassis_set = {raw}
+            elif isinstance(raw, list):
+                chassis_set = set(raw)
+            else:
+                chassis_set = set()
+
+            if chassis_set & _CHASSIS_NOTEBOOK:
+                tipo = 'notebook'
+            elif chassis_set & _CHASSIS_TABLET:
+                tipo = 'tablet'
+            elif chassis_set & _CHASSIS_ALLINONE:
+                tipo = 'all-in-one'
+            elif chassis_set & _CHASSIS_SERVIDOR:
+                tipo = 'servidor'
+            elif chassis_set & _CHASSIS_DESKTOP:
+                tipo = 'desktop'
+            elif chassis_set:
+                tipo = 'desconocido'
+            else:
+                # Fallback: si no hay datos de chasis, usar batería
+                tipo = 'notebook' if tiene_bateria else 'desktop'
+
+            return {
+                'tipo': tipo,
+                'tiene_bateria': tiene_bateria,
+                'chassis_raw': list(chassis_set),
+            }
+    except Exception as e:
+        print(f"⚠️ No se pudo detectar tipo de equipo: {e}")
+
+    return {'tipo': 'desconocido', 'tiene_bateria': False, 'chassis_raw': []}
+
+
 def obtener_id_inventario():
     try:
         cmd = 'wmic csproduct get uuid'
@@ -783,6 +846,7 @@ def obtener_datos_pc(incluir_pesados=True):
         "ram_total_gb": cache['ram_total_gb'],
         "modulos_ram": cache['modulos_ram'],
         "windows_version_detallada": cache.get('windows_version_detallada') or {},
+        "tipo_equipo": cache['tipo_equipo'],
         
         # Datos dinámicos ligeros
         "cpu_uso_porcentaje": psutil.cpu_percent(interval=0.5),  # REDUCIDO DE 1 A 0.5

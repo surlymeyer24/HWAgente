@@ -18,6 +18,7 @@ function docToComputadora(id: string, data: Record<string, unknown>): HWComputad
     ip_publica: (data.ip_publica as string) ?? null,
     anydesk_id: (data.anydesk_id as string) ?? null,
     version_agente: (data.version_agente as string) ?? null,
+    version: (data.version as string) ?? null,
     ultima_sincronizacion: data.ultima_sincronizacion as HWComputadora['ultima_sincronizacion'],
     ultima_sync: data.ultima_sync as HWComputadora['ultima_sync'],
     perifericos: (data.perifericos as HWComputadora['perifericos']) ?? null,

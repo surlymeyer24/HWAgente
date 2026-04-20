@@ -88,6 +88,80 @@ def set_machine_uuid(uuid):
     global _machine_uuid
     _machine_uuid = uuid
 
+
+_REGISTRY_KEY = r"SOFTWARE\AgenteBacar"
+_REGISTRY_VALUE = "machine_id"
+
+
+def _leer_machine_id_registro() -> str | None:
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, _REGISTRY_KEY) as k:
+            val, _ = winreg.QueryValueEx(k, _REGISTRY_VALUE)
+            return val.strip() if val and val.strip() else None
+    except Exception:
+        return None
+
+
+def _guardar_machine_id_registro(machine_id: str) -> None:
+    try:
+        import winreg
+        with winreg.CreateKey(winreg.HKEY_LOCAL_MACHINE, _REGISTRY_KEY) as k:
+            winreg.SetValueEx(k, _REGISTRY_VALUE, 0, winreg.REG_SZ, machine_id)
+        log_debug(f"machine_id guardado en registro: {machine_id}")
+    except Exception as e:
+        log_debug(f"No se pudo guardar machine_id en registro: {e}")
+
+
+def resolver_machine_id(uuid_hardware: str, hostname: str) -> str:
+    """
+    Devuelve el ID definitivo de esta máquina para Firestore.
+    Orden de prioridad:
+      1. HKLM\\SOFTWARE\\AgenteBacar\\machine_id  (se confía siempre si existe)
+      2. uuid_hardware si no hay colisión en Firestore
+      3. f"{hostname}_{uuid_hardware[:8]}" si otro equipo ya usa ese UUID
+    El ID resuelto se persiste en el registro para los próximos arranques.
+    """
+    # 1. Registro local — fuente de verdad para arranques posteriores
+    id_local = _leer_machine_id_registro()
+    if id_local:
+        log_debug(f"resolver_machine_id: ID del registro → {id_local}")
+        return id_local
+
+    # 2. Primera vez — verificar colisión en Firestore
+    try:
+        doc = db.collection(FIREBASE_COLLECTION_NAME).document(uuid_hardware).get()
+        if doc.exists:
+            hostname_existente = (doc.to_dict() or {}).get("hostname", "")
+            if hostname_existente and hostname_existente.lower() != hostname.lower():
+                id_alternativo = f"{hostname}_{uuid_hardware[:8]}".lower()
+                log_debug(
+                    f"resolver_machine_id: COLISION — uuid={uuid_hardware} pertenece a "
+                    f"'{hostname_existente}'. Este equipo ({hostname}) usará '{id_alternativo}'"
+                )
+                registrar_log_actualizacion(
+                    "UUID_COLISION",
+                    f"UUID {uuid_hardware} ya pertenece a '{hostname_existente}'; "
+                    f"este equipo ({hostname}) usará ID alternativo '{id_alternativo}'.",
+                    uuid=id_alternativo,
+                    hostname=hostname,
+                    extra={
+                        "uuid_hardware": uuid_hardware,
+                        "hostname_colisionante": hostname_existente,
+                        "id_alternativo": id_alternativo,
+                    },
+                )
+                _guardar_machine_id_registro(id_alternativo)
+                return id_alternativo
+    except Exception as e:
+        log_debug(f"resolver_machine_id: error verificando Firestore ({e}). Usando uuid_hardware.")
+
+    # Sin colisión — usar UUID de hardware
+    _guardar_machine_id_registro(uuid_hardware)
+    log_debug(f"resolver_machine_id: sin colisión → {uuid_hardware}")
+    return uuid_hardware
+
+
 def log_centralizado(level, category, message, exception=None):
     """Escribe un log a la colección centralizada cyberwatch_logs (dashboard)."""
     try:
@@ -381,7 +455,7 @@ def enviar_datos_pc(datos, forzar_completo=False):
             datos["ultima_sincronizacion"] = firestore.SERVER_TIMESTAMP
             datos["version_agente"] = VERSION_AGENTE or "?"
             datos["estado_conexion"] = "ONLINE"
-            db.collection(FIREBASE_COLLECTION_NAME).document(document_id).set(datos)
+            db.collection(FIREBASE_COLLECTION_NAME).document(document_id).set(datos, merge=True)
             _contadores['ultima_sync_completa'] = tiempo_actual
             _contadores['ultima_sync_apps'] = tiempo_actual
             _contadores['ultima_sync_errores'] = tiempo_actual

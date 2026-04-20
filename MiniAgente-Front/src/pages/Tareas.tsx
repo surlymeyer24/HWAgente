@@ -9,7 +9,7 @@ import {
 } from '../hooks/useLogsActualizacion';
 import { formatTimestamp } from '../lib/format';
 import { EVENTO_BADGE_HW } from '../lib/comandoLogBadges';
-import type { HWTarea } from '../types/firestore';
+import type { HWComputadora, HWTarea } from '../types/firestore';
 
 function getLogTexto(t: HWTarea): string {
   if (t.log) return t.log;
@@ -30,12 +30,58 @@ function finDiaLocal(iso: string): Date {
   return new Date(y, m - 1, d, 23, 59, 59, 999);
 }
 
-function ComandosMaquina({ computadoraId, hostname }: { computadoraId: string; hostname: string }) {
+function versionInstaladaTexto(c: HWComputadora): string {
+  const v = c.version_agente ?? c.version;
+  if (v == null || String(v).trim() === '') return '—';
+  return String(v);
+}
+
+function ComandosMaquina({
+  computadoraId,
+  hostname,
+  versionLabel,
+  seleccionada,
+  onToggleSeleccion,
+}: {
+  computadoraId: string;
+  hostname: string;
+  versionLabel: string;
+  seleccionada: boolean;
+  onToggleSeleccion: () => void;
+}) {
   const { enviarActualizarDatos, enviarActualizarAgente, sending, error } = useComandoHW(computadoraId);
   return (
-    <div className="comandos-hw">
-      <span className="comandos-hw-host">{hostname || computadoraId}</span>
-      <div className="actions">
+    <div
+      className="comandos-hw"
+      role="presentation"
+      onClick={onToggleSeleccion}
+      style={{ cursor: 'pointer' }}
+      title="Clic en la fila para marcar o desmarcar en actualización masiva del agente"
+    >
+      <label
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '0.35rem',
+          cursor: 'pointer',
+          flexShrink: 0,
+        }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <input
+          type="checkbox"
+          checked={seleccionada}
+          onChange={onToggleSeleccion}
+          aria-label={`Incluir ${hostname || computadoraId} en actualización masiva del agente`}
+        />
+      </label>
+      <div style={{ flex: '1 1 12rem', minWidth: 0 }}>
+        <div className="comandos-hw-host">{hostname || computadoraId}</div>
+        <div className="muted small" style={{ marginTop: '0.15rem' }}>
+          Versión instalada: <strong>{versionLabel}</strong>
+        </div>
+      </div>
+      <div className="actions" onClick={(e) => e.stopPropagation()}>
         <button
           type="button"
           className="btn btn-secondary btn-sm"
@@ -53,7 +99,15 @@ function ComandosMaquina({ computadoraId, hostname }: { computadoraId: string; h
           Actualizar agente
         </button>
       </div>
-      {error && <p className="error small">{error}</p>}
+      {error && (
+        <p
+          className="error small"
+          style={{ flexBasis: '100%', marginBottom: 0 }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          {error}
+        </p>
+      )}
     </div>
   );
 }
@@ -69,6 +123,9 @@ export function Tareas() {
   );
   const [enviandoActualizarTodas, setEnviandoActualizarTodas] = useState(false);
   const [errorActualizarTodas, setErrorActualizarTodas] = useState<string | null>(null);
+  const [idsAgenteSeleccion, setIdsAgenteSeleccion] = useState<Set<string>>(() => new Set());
+  const [enviandoAgenteSeleccion, setEnviandoAgenteSeleccion] = useState(false);
+  const [errorAgenteSeleccion, setErrorAgenteSeleccion] = useState<string | null>(null);
 
   const rangoFechasInvalido = Boolean(
     logFechaDesde && logFechaHasta && logFechaDesde > logFechaHasta
@@ -89,6 +146,22 @@ export function Tareas() {
   useEffect(() => {
     setFeedbackBorrarLogs(null);
   }, [logFechaDesde, logFechaHasta]);
+
+  const idsComputadorasValidos = useMemo(
+    () => new Set(computadoras.map((c) => c.id)),
+    [computadoras]
+  );
+
+  useEffect(() => {
+    setIdsAgenteSeleccion((prev) => {
+      const next = new Set<string>();
+      for (const id of prev) {
+        if (idsComputadorasValidos.has(id)) next.add(id);
+      }
+      if (next.size === prev.size) return prev;
+      return next;
+    });
+  }, [idsComputadorasValidos]);
 
   async function handleBorrarLogs() {
     const hayFiltroFecha = Boolean(logFechaDesde || logFechaHasta) && !rangoFechasInvalido;
@@ -138,6 +211,45 @@ export function Tareas() {
     }
   }
 
+  function toggleSeleccionAgente(id: string) {
+    setIdsAgenteSeleccion((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function seleccionarTodasAgente() {
+    setIdsAgenteSeleccion(new Set(computadoras.map((c) => c.id)));
+  }
+
+  function deseleccionarTodasAgente() {
+    setIdsAgenteSeleccion(new Set());
+  }
+
+  async function handleActualizarAgenteSeleccionadas() {
+    const ids = [...idsAgenteSeleccion];
+    const n = ids.length;
+    if (n === 0) return;
+    if (
+      !window.confirm(
+        `¿Enviar ACTUALIZAR_AGENTE a ${n} máquina${n !== 1 ? 's' : ''} seleccionada${n !== 1 ? 's' : ''}?\n\n` +
+          'Cada una descargará el .exe desde la URL configurada en Firebase y reiniciará el servicio. ' +
+          'Asegurate de tener la URL y el binario correctos antes de continuar.'
+      )
+    ) {
+      return;
+    }
+    setErrorAgenteSeleccion(null);
+    setEnviandoAgenteSeleccion(true);
+    const res = await enviarComandoAMaquinas(ids, 'ACTUALIZAR_AGENTE');
+    setEnviandoAgenteSeleccion(false);
+    if (!res.ok) {
+      setErrorAgenteSeleccion(res.message);
+    }
+  }
+
   if (loading) {
     return (
       <div className="page">
@@ -166,8 +278,10 @@ export function Tareas() {
       <section className="section">
         <h2>Comandos a máquinas</h2>
         <p className="muted">
-          Envía <strong>Actualizar datos</strong> o <strong>Actualizar agente</strong>.
-          El agente HW en esa máquina leerá el comando desde Firestore.
+          Cada fila muestra la <strong>versión instalada</strong> que reporta la PC en Firestore (
+          <code>version_agente</code> o, si no hay, <code>version</code>). Marcá equipos con la casilla y
+          usá <strong>Actualizar agente en seleccionadas</strong> para mandar{' '}
+          <code>ACTUALIZAR_AGENTE</code> solo a ellos. También podés usar los botones por máquina.
         </p>
         {loadingPcs ? (
           <p className="muted">Cargando computadoras…</p>
@@ -175,7 +289,7 @@ export function Tareas() {
           <p className="muted">No hay computadoras en la BD.</p>
         ) : (
           <>
-            <div className="actions" style={{ marginBottom: '1rem' }}>
+            <div className="actions" style={{ marginBottom: '1rem', flexWrap: 'wrap' }}>
               <button
                 type="button"
                 className="btn btn-secondary btn-sm"
@@ -186,15 +300,53 @@ export function Tareas() {
                   ? 'Enviando a todas…'
                   : `Actualizar datos en todas (${computadoras.length})`}
               </button>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                disabled={computadoras.length === 0}
+                onClick={seleccionarTodasAgente}
+              >
+                Seleccionar todas (agente)
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                disabled={idsAgenteSeleccion.size === 0}
+                onClick={deseleccionarTodasAgente}
+              >
+                Deseleccionar
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary btn-sm"
+                disabled={idsAgenteSeleccion.size === 0 || enviandoAgenteSeleccion}
+                onClick={() => void handleActualizarAgenteSeleccionadas()}
+              >
+                {enviandoAgenteSeleccion
+                  ? 'Enviando ACTUALIZAR_AGENTE…'
+                  : `Actualizar agente en seleccionadas (${idsAgenteSeleccion.size})`}
+              </button>
             </div>
             {errorActualizarTodas && (
               <p className="error small" style={{ marginBottom: '0.75rem' }}>
                 {errorActualizarTodas}
               </p>
             )}
+            {errorAgenteSeleccion && (
+              <p className="error small" style={{ marginBottom: '0.75rem' }}>
+                {errorAgenteSeleccion}
+              </p>
+            )}
             <div className="comandos-hw-list">
               {computadoras.map((c) => (
-                <ComandosMaquina key={c.id} computadoraId={c.id} hostname={c.hostname ?? c.id} />
+                <ComandosMaquina
+                  key={c.id}
+                  computadoraId={c.id}
+                  hostname={c.hostname ?? c.id}
+                  versionLabel={versionInstaladaTexto(c)}
+                  seleccionada={idsAgenteSeleccion.has(c.id)}
+                  onToggleSeleccion={() => toggleSeleccionAgente(c.id)}
+                />
               ))}
             </div>
           </>

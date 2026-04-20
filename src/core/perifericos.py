@@ -3,6 +3,27 @@ import re
 import json
 
 # ==================== MONITORES ====================
+_NOMBRES_MONITOR_GENERICOS = {
+    'hdmi', 'led', 'lcd', 'monitor', 'monitor generico', 'generic monitor',
+    'hdmi1', 'hdmi2', 'hdmi 1', 'hdmi 2', 'vga', 'dvi', 'displayport',
+    'color lcd', 'unknown', 'desconocido', 'monitor detectado',
+}
+
+
+def _limpiar_nombre_monitor(nombre: str, pulgadas: float, resolucion: str) -> str:
+    """Reemplaza nombres de monitor sin valor (HDMI, LED, etc.) por una descripción útil."""
+    nombre_norm = nombre.lower().strip()
+    if nombre_norm not in _NOMBRES_MONITOR_GENERICOS:
+        return nombre
+    if pulgadas and resolucion:
+        return f'Monitor {pulgadas}" ({resolucion})'
+    if pulgadas:
+        return f'Monitor {pulgadas}"'
+    if resolucion:
+        return f'Monitor ({resolucion})'
+    return 'Monitor externo'
+
+
 def obtener_monitores():
     """Obtiene información de monitores conectados"""
     monitores = []
@@ -65,12 +86,15 @@ def obtener_monitores():
         # Obtener resoluciones actuales
         resoluciones = obtener_resoluciones_monitores()
         
-        # Combinar información
+        # Combinar información y limpiar nombres genéricos
         for i, monitor in enumerate(monitores):
             if i < len(resoluciones):
                 monitor['resolucion'] = resoluciones[i]
             else:
                 monitor['resolucion'] = 'Desconocida'
+            monitor['nombre'] = _limpiar_nombre_monitor(
+                monitor['nombre'], monitor.get('pulgadas', 0), monitor.get('resolucion', '')
+            )
                 
     except Exception as e:
         print(f"⚠️ Error obteniendo monitores: {e}")

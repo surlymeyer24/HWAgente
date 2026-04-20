@@ -120,6 +120,7 @@ if RUNNING_AS_SERVICE:
                     log_debug,
                     registrar_log_actualizacion,
                     reportar_post_actualizacion_agente_si_aplica,
+                    resolver_machine_id,
                     set_machine_uuid,
                     VERSION_AGENTE,
                 )
@@ -132,9 +133,11 @@ if RUNNING_AS_SERVICE:
                 log_arranque("SVCRUN_RUNNING — servicio activo")
 
                 datos = obtener_datos_pc()
-                set_machine_uuid(datos.get("uuid"))
+                uuid_final = resolver_machine_id(datos.get("uuid", ""), datos.get("hostname", ""))
+                datos["uuid"] = uuid_final
+                set_machine_uuid(uuid_final)
                 log_centralizado("Info", "Servicio", "AgenteBacar iniciado")
-                reportar_post_actualizacion_agente_si_aplica(datos.get("uuid"))
+                reportar_post_actualizacion_agente_si_aplica(uuid_final)
                 registrar_log_actualizacion(
                     "ARRANQUE_SERVICIO",
                     "AgenteBacar iniciado correctamente",
@@ -142,7 +145,7 @@ if RUNNING_AS_SERVICE:
                     hostname=datos.get("hostname"),
                     extra={"version": VERSION_AGENTE or "?", "pid": os.getpid()},
                 )
-                log_arranque(f"SVCRUN_SYNC_INICIAL — uuid: {datos.get('uuid')}")
+                log_arranque(f"SVCRUN_SYNC_INICIAL — uuid: {uuid_final}")
                 enviar_datos_pc(datos)
                 # Evento para despertar el bucle cuando Firebase envíe ACTUALIZAR_AGENTE
                 try:
