@@ -752,8 +752,8 @@ def obtener_usuarios():
         return {"usuario_actual": "Desconocido", "usuarios_activos": []}
 
 
-_CHASSIS_NOTEBOOK = {8, 9, 10, 11, 14}
-_CHASSIS_TABLET   = {30, 31, 32}
+_CHASSIS_NOTEBOOK = {8, 9, 10, 11, 14, 31}
+_CHASSIS_TABLET   = {30, 32}
 _CHASSIS_DESKTOP  = {3, 4, 5, 6, 7, 15, 16}
 _CHASSIS_ALLINONE = {13}
 _CHASSIS_SERVIDOR = {17, 22, 23, 25}

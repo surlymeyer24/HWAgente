@@ -1100,7 +1100,9 @@ def obtener_dispositivos_audio():
         # DEVPKEY_AudioEndpoint_FormFactor = {1DA5D803-D492-4EDD-8C23-E0C0FFEE7F0E} 0
         ps_script = """
         $devs = Get-PnpDevice -PresentOnly |
-            Where-Object { $_.InstanceId -like "SWD\\MMDEVAPI*" -and $_.Status -eq "OK" }
+            Where-Object { $_.InstanceId -like "SWD\\MMDEVAPI*" -and $_.Status -eq "OK" -and (
+                $_.InstanceId -like "*{0.0.0.*" -or $_.InstanceId -like "*{0.0.1.*"
+            ) }
         $devs | ForEach-Object {
             $ff = $null
             $parent = $null
