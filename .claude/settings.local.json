@@ -10,7 +10,9 @@
       "Bash(powershell -Command \"Get-PhysicalDisk | Select-Object DeviceId, MediaType | ConvertTo-Json\")",
       "Bash(npx tsc:*)",
       "Bash(python -c \"from src.core.perifericos import obtener_dispositivos_usb, formatear_dispositivos_usb; devs = obtener_dispositivos_usb\\(\\); print\\(formatear_dispositivos_usb\\(devs\\)\\); print\\(\\); print\\('--- Datos crudos ---'\\); import pprint; pprint.pprint\\(devs\\)\")",
-      "Bash(python -X utf8 -c ':*)"
+      "Bash(python -X utf8 -c ':*)",
+      "Bash(powershell -NoProfile -Command ' *)",
+      "Bash(powershell -NoProfile -Command \"Get-WmiObject Win32_SoundDevice | Select-Object Name, Manufacturer, Status | Format-List\")"
     ]
   }
 }

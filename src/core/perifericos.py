@@ -12,7 +12,7 @@ _NOMBRES_MONITOR_GENERICOS = {
 
 def _limpiar_nombre_monitor(nombre: str, pulgadas: float, resolucion: str) -> str:
     """Reemplaza nombres de monitor sin valor (HDMI, LED, etc.) por una descripción útil."""
-    nombre_norm = nombre.lower().strip()
+    nombre_norm = _normalizar_para_comparacion(nombre)
     if nombre_norm not in _NOMBRES_MONITOR_GENERICOS:
         return nombre
     if pulgadas and resolucion:
@@ -297,7 +297,6 @@ _CATEGORIAS_USB = {
     'Mouse': 'Mouse',
     'HIDClass': 'Controlador HID',
     'Image': 'Cámara/Scanner',
-    'Media': 'Audio/Video',
     'DiskDrive': 'Almacenamiento (pendrive/disco)',
     'Printer': 'Impresora',
     'Bluetooth': 'Bluetooth',
@@ -644,6 +643,43 @@ def _normalizar_para_comparacion(texto: str) -> str:
     return t
 
 
+_NOMBRES_INTEGRADOS = (
+    'touchpad', 'trackpad', 'clickpad', 'precision touchpad',
+    'integrated camera', 'integrated webcam', 'built-in camera',
+    'camara integrada', 'webcam integrada', 'hp truevision', 'lenovo integrated',
+    'dell integrated', 'synaptics', 'elan ', 'alps pointing',
+)
+
+
+def _es_periferico_integrado(instance_id: str, nombre: str = '') -> bool:
+    """Detecta si un periférico es integrado (ACPI/PS2/I2C/nombre característico)."""
+    if not instance_id and not nombre:
+        return False
+    upper = (instance_id or '').upper()
+    # Buses internos: ACPI, PS/2, I2C (touchpads de precisión), ROOT
+    if upper.startswith(('ACPI\\', 'ROOT\\')):
+        return True
+    if 'PS2' in upper or 'I8042' in upper:
+        return True
+    if upper.startswith('HID\\') and 'I2C' in upper:
+        return True
+    # Nombres típicos de periféricos integrados
+    nombre_norm = _normalizar_para_comparacion(nombre)
+    if any(kw in nombre_norm for kw in _NOMBRES_INTEGRADOS):
+        return True
+    return False
+
+
+def _es_audio_integrado(parent_instance_id: str) -> bool:
+    """Audio integrado si el padre no es USB ni Bluetooth (típicamente HDAUDIO/INTELAUDIO)."""
+    if not parent_instance_id:
+        return False
+    upper = parent_instance_id.upper()
+    if 'VID_' in upper or upper.startswith(('USB\\', 'BTHENUM\\', 'BTH\\', 'BTHHID\\')):
+        return False
+    return True
+
+
 def _es_dispositivo_excluido(nombre: str) -> bool:
     """Verifica si el dispositivo debe excluirse (infraestructura interna)"""
     nombre_norm = _normalizar_para_comparacion(nombre)
@@ -726,7 +762,12 @@ def obtener_dispositivos_usb():
                 $_.InstanceId -like "BTHENUM*" -or
                 $_.InstanceId -like "BTH\\*" -or
                 $_.InstanceId -like "BTHHID*" -or
-                ($_.InstanceId -like "HID\\VID_*" -and $_.Class -in @('Keyboard','Mouse'))
+                ($_.InstanceId -like "HID\\VID_*" -and $_.Class -in @('Keyboard','Mouse')) -or
+                ($_.Class -in @('Keyboard','Mouse') -and (
+                    $_.InstanceId -like "ACPI\\*" -or
+                    $_.InstanceId -like "*I8042*" -or
+                    $_.InstanceId -like "HID\\ACPI*"
+                ))
             )
         }
         $devs | ForEach-Object {
@@ -773,8 +814,14 @@ def obtener_dispositivos_usb():
                 if _es_dispositivo_excluido(nombre):
                     continue
 
+                # Excluir dispositivos de audio — se reportan vía obtener_dispositivos_audio()
+                # (MMDEVAPI da tipo correcto: parlante/auricular/headset + marca por VID)
+                if clase == 'Media' or clase == 'AudioEndpoint':
+                    continue
+
                 # Si el fabricante es genérico, intentar resolver via VID
-                if fabricante.lower().strip() in _FABRICANTES_GENERICOS:
+                fab_norm = fabricante.lower().strip()
+                if fab_norm in _FABRICANTES_GENERICOS or (fab_norm.startswith('(') and fab_norm.endswith(')')):
                     vid_fabricante = _resolver_fabricante_por_vid(instance_id)
                     if vid_fabricante:
                         fabricante = vid_fabricante
@@ -801,6 +848,7 @@ def obtener_dispositivos_usb():
                     'categoria': categoria,
                     'fabricante': fabricante or '—',
                     'clase': clase,
+                    'integrado': _es_periferico_integrado(instance_id, nombre_final),
                     '_hid_tipo': hid_tipo,
                     '_instance_id': instance_id,
                     '_bus_desc': bus_desc,
@@ -856,6 +904,10 @@ def obtener_dispositivos_usb():
                     'categoria': 'Teclado',
                     'fabricante': _extraer_marca(t0) if n == 1 else '—',
                     'clase': 'Keyboard',
+                    'integrado': any(
+                        _es_periferico_integrado(d.get('_instance_id', ''), d.get('nombre', ''))
+                        for d in teclados
+                    ),
                     'conexion': _inferir_conexion(
                         t0.get('_instance_id', ''),
                         vids_receptores,
@@ -871,6 +923,10 @@ def obtener_dispositivos_usb():
                     'categoria': 'Mouse',
                     'fabricante': _extraer_marca(m0) if n == 1 else '—',
                     'clase': 'Mouse',
+                    'integrado': any(
+                        _es_periferico_integrado(d.get('_instance_id', ''), d.get('nombre', ''))
+                        for d in mouses
+                    ),
                     'conexion': _inferir_conexion(
                         m0.get('_instance_id', ''),
                         vids_receptores,
@@ -885,6 +941,10 @@ def obtener_dispositivos_usb():
                     'categoria': 'Controlador HID',
                     'fabricante': '—',
                     'clase': 'HIDClass',
+                    'integrado': any(
+                        _es_periferico_integrado(d.get('_instance_id', ''), d.get('nombre', ''))
+                        for d in otros_hid
+                    ),
                 })
 
             # Limpiar campos internos
@@ -1095,6 +1155,7 @@ def obtener_dispositivos_audio():
                     'fabricante': marca,
                     'tipo': tipo,
                     'estado': 'Activo',
+                    'integrado': _es_audio_integrado(parent_id),
                 }
 
                 if is_render:
