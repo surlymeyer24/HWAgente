@@ -81,6 +81,48 @@ def log_debug(mensaje):
         pass
 
 
+def _verificar_y_reparar_conectividad():
+    """Verifica HTTPS saliente; si falla, agrega regla de firewall para este exe y reintenta."""
+    import urllib.request
+    import subprocess as _sp
+
+    def _puede_conectar():
+        try:
+            urllib.request.urlopen("https://www.google.com", timeout=5)
+            return True
+        except Exception:
+            return False
+
+    if _puede_conectar():
+        return
+
+    log_debug("FIREWALL_CHECK — sin conectividad HTTPS saliente, intentando agregar regla de firewall")
+
+    exe_path = sys.executable
+    try:
+        cmd = (
+            f'netsh advfirewall firewall add rule '
+            f'name="AgenteBacar_Salida" dir=out action=allow '
+            f'program="{exe_path}" enable=yes'
+        )
+        res = _sp.run(
+            cmd, shell=True, capture_output=True, text=True,
+            encoding="utf-8", errors="replace",
+            creationflags=_sp.CREATE_NO_WINDOW,
+        )
+        if res.returncode == 0:
+            log_debug(f"FIREWALL_REGLA_AGREGADA — {exe_path}")
+        else:
+            log_debug(f"FIREWALL_REGLA_ERROR — rc={res.returncode} | {res.stdout.strip()} | {res.stderr.strip()}")
+    except Exception as e:
+        log_debug(f"FIREWALL_REGLA_EXCEPCION — {e}")
+
+    if _puede_conectar():
+        log_debug("FIREWALL_CHECK — conectividad restaurada tras agregar regla")
+    else:
+        log_debug("FIREWALL_CHECK — sin conectividad tras agregar regla (posible firewall corporativo o proxy)")
+
+
 # UUID de la máquina, se setea desde main.py al arrancar
 _machine_uuid = None
 
@@ -300,6 +342,7 @@ VERSION_AGENTE = _version_desde_exe_o_config()
 # Inicialización única
 if not firebase_admin._apps:
     try:
+        _verificar_y_reparar_conectividad()
         if not os.path.exists(FIREBASE_JSON_PATH):
             log_debug(f"ERROR: No existe el JSON en {FIREBASE_JSON_PATH}")
         cred = credentials.Certificate(FIREBASE_JSON_PATH)
