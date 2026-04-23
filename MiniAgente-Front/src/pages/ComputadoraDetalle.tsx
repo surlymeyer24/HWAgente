@@ -388,7 +388,12 @@ function TabPeripherals({ pc }: { pc: HWComputadora }) {
         <section className="detail-section">
           <h3>Impresoras</h3>
           <ul className="detail-list">
-            {perif.impresoras.map((imp, i) => <li key={i}>{imp.nombre ?? '—'}</li>)}
+            {perif.impresoras.map((imp, i) => (
+              <li key={i}>
+                {imp.nombre ?? '—'}
+                {imp.ip_red && <span className="pc-muted"> · {imp.ip_red}</span>}
+              </li>
+            ))}
           </ul>
         </section>
       )}

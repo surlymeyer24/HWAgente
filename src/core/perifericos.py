@@ -213,43 +213,96 @@ def _clasificar_impresora(nombre: str, driver: str, puerto: str) -> tuple[str, s
 def obtener_impresoras():
     """Obtiene impresoras instaladas (locales y de red)"""
     impresoras = []
-    
+
     try:
-        ps_script = """
-        Get-Printer | Select-Object Name, DriverName, PortName, 
-                     @{Name='Tipo';Expression={
-                         if ($_.Type -eq 'Local') {'Local'} 
-                         elseif ($_.Type -eq 'Connection') {'Red'} 
-                         else {$_.Type}
-                     }},
-                     @{Name='Estado';Expression={
-                         if ($_.PrinterStatus -eq 3) {'Inactiva'} 
-                         elseif ($_.PrinterStatus -eq 4) {'Imprimiendo'} 
-                         else {'Disponible'}
-                     }},
-                     Shared,
-                     @{Name='Predeterminada';Expression={
-                         $defaultPrinter = (Get-WmiObject Win32_Printer | Where-Object {$_.Default -eq $true}).Name
-                         $_.Name -eq $defaultPrinter
-                     }} | 
-        ConvertTo-Json
-        """
-        
+        ps_script = r"""
+$printers = Get-Printer | Select-Object Name, DriverName, PortName,
+    @{Name='Tipo';Expression={
+        if ($_.Type -eq 'Local') {'Local'}
+        elseif ($_.Type -eq 'Connection') {'Red'}
+        else {$_.Type}
+    }},
+    @{Name='Estado';Expression={
+        if ($_.PrinterStatus -eq 3) {'Inactiva'}
+        elseif ($_.PrinterStatus -eq 4) {'Imprimiendo'}
+        else {'Disponible'}
+    }},
+    Shared,
+    @{Name='Predeterminada';Expression={
+        $defaultPrinter = (Get-WmiObject Win32_Printer -ErrorAction SilentlyContinue |
+            Where-Object {$_.Default -eq $true}).Name
+        $_.Name -eq $defaultPrinter
+    }}
+
+$portIps = @{}
+foreach ($p in $printers) {
+    $port = $p.PortName
+    if (-not $port) { continue }
+    $portU = $port.ToUpper()
+    $ip = $null
+
+    if ($portU.StartsWith('WSD-')) {
+        $regPath = "HKLM:\SYSTEM\CurrentControlSet\Control\Print\Monitors\WSD Port\Ports\$port"
+        if (Test-Path $regPath) {
+            try {
+                $props = Get-ItemProperty -Path $regPath -ErrorAction SilentlyContinue
+                $ips = $props.IPAddresses
+                if ($ips -and $ips.Count -gt 0) {
+                    $ip = $ips[0]
+                } elseif ($props.HostName) {
+                    $ip = $props.HostName
+                }
+            } catch {}
+        }
+    } elseif ($portU.StartsWith('IP_')) {
+        $candidate = $port.Substring(3)
+        if ($candidate -match '^\d{1,3}(\.\d{1,3}){3}$') {
+            $ip = $candidate
+        } else {
+            try {
+                $wmiPort = Get-WmiObject Win32_TCPIPPrinterPort `
+                    -Filter "Name='$port'" -ErrorAction SilentlyContinue
+                if ($wmiPort) { $ip = $wmiPort.HostAddress }
+            } catch {}
+        }
+    } elseif ($portU.StartsWith('TCP')) {
+        try {
+            $wmiPort = Get-WmiObject Win32_TCPIPPrinterPort `
+                -Filter "Name='$port'" -ErrorAction SilentlyContinue
+            if ($wmiPort) { $ip = $wmiPort.HostAddress }
+        } catch {}
+    }
+
+    if ($ip) { $portIps[$port] = $ip }
+}
+
+[PSCustomObject]@{
+    printers = $printers
+    port_ips = $portIps
+} | ConvertTo-Json -Depth 4
+"""
+
         resultado = subprocess.run(
             ['powershell', '-NoProfile', '-Command', ps_script],
             capture_output=True,
             text=True,
             encoding='utf-8', errors='replace',
-            timeout=10,
+            timeout=15,
             creationflags=subprocess.CREATE_NO_WINDOW
         )
-        
+
         if resultado.returncode == 0 and resultado.stdout.strip():
-            datos = json.loads(resultado.stdout)
-            
+            payload = json.loads(resultado.stdout)
+
+            if isinstance(payload, list):
+                datos, port_ips = payload, {}
+            else:
+                datos    = payload.get('printers', [])
+                port_ips = payload.get('port_ips') or {}
+
             if isinstance(datos, dict):
                 datos = [datos]
-            
+
             for impresora in datos:
                 nombre = impresora.get('Name', 'Desconocida')
                 driver = impresora.get('DriverName', 'N/A')
@@ -267,11 +320,13 @@ def obtener_impresoras():
                 }
                 if conexion_imp is not None:
                     entry['conexion_impresora'] = conexion_imp
+                if conexion_imp == 'red' and puerto in port_ips:
+                    entry['ip_red'] = port_ips[puerto]
                 impresoras.append(entry)
-                
+
     except Exception as e:
         print(f"⚠️ Error obteniendo impresoras: {e}")
-    
+
     return impresoras
 
 

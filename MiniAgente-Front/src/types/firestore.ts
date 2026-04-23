@@ -36,7 +36,7 @@ export interface HWPerifericos {
     /** usb | bluetooth | inalambrico_usb — teclado/mouse consolidados */
     conexion?: string;
   }>;
-  impresoras?: Array<{ nombre?: string; tipo?: string; estado?: string; tipo_impresora?: string; conexion_impresora?: string }>;
+  impresoras?: Array<{ nombre?: string; tipo?: string; estado?: string; tipo_impresora?: string; conexion_impresora?: string; ip_red?: string }>;
   audio?: { salida?: Array<{ nombre?: string }> };
   [key: string]: unknown;
 }

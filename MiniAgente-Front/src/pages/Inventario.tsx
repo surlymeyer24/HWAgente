@@ -161,7 +161,7 @@ function extraerPerifericos(pc: HWComputadora, lastSync: string): InventarioRow[
     });
   }
   for (const i of p.impresoras ?? []) {
-    rows.push({ hostname, pcId: pc.id, tipo: 'Impresora', nombre: i.nombre ?? '—', detalles: [i.tipo, i.estado].filter(Boolean).join(' · ') || '—', lastSync });
+    rows.push({ hostname, pcId: pc.id, tipo: 'Impresora', nombre: i.nombre ?? '—', detalles: [i.tipo, i.estado, i.ip_red ? `IP: ${i.ip_red}` : undefined].filter(Boolean).join(' · ') || '—', lastSync });
   }
   for (const a of p.audio?.salida ?? []) {
     rows.push({ hostname, pcId: pc.id, tipo: 'Audio', nombre: a.nombre ?? '—', detalles: 'Salida de audio', lastSync });
