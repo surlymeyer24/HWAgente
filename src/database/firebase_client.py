@@ -212,6 +212,28 @@ def resolver_machine_id(uuid_hardware: str, hostname: str) -> str:
     except Exception as e:
         log_debug(f"resolver_machine_id: error verificando Firestore ({e}). Usando uuid_hardware.")
 
+    # 2.5 Fallback: buscar doc existente por campo uuid_hardware + hostname
+    #     Cubre reinstalaciones donde el doc tiene ID combinado (registro vacío)
+    try:
+        candidatos = (
+            db.collection(FIREBASE_COLLECTION_NAME)
+            .where("uuid_hardware", "==", uuid_hardware)
+            .limit(5)
+            .get()
+        )
+        for doc in candidatos:
+            data = doc.to_dict() or {}
+            if data.get("hostname", "").lower() == hostname.lower():
+                id_recuperado = doc.id
+                log_debug(
+                    f"resolver_machine_id: doc recuperado por uuid_hardware "
+                    f"→ {id_recuperado}"
+                )
+                _guardar_machine_id_registro(id_recuperado)
+                return id_recuperado
+    except Exception as e:
+        log_debug(f"resolver_machine_id: error en búsqueda por uuid_hardware ({e}).")
+
     # Sin colisión — usar UUID de hardware
     _guardar_machine_id_registro(uuid_hardware)
     log_debug(f"resolver_machine_id: sin colisión → {uuid_hardware}")

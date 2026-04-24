@@ -836,8 +836,10 @@ def obtener_datos_pc(incluir_pesados=True):
     cache = inicializar_cache()
     
     # Datos base (SIEMPRE)
+    _uuid_hw = obtener_id_inventario()
     datos = {
-        "uuid": obtener_id_inventario(),
+        "uuid": _uuid_hw,
+        "uuid_hardware": _uuid_hw,
         "hostname": cache['hostname'],
         "sistema_operativo": cache['sistema_operativo'],
         "arquitectura": cache['arquitectura'],
