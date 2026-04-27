@@ -68,9 +68,9 @@ Los comandos se envían desde el frontend escribiendo en el documento `tareas/{u
 ### Auto-actualización
 
 1. El frontend escribe `ACTUALIZAR_AGENTE` en Firestore
-2. **AgenteBacar** lee la URL desde **`config/agente_hw.url`**; si no hay, usa **`config/agente.url`** (legacy). El campo **`version`** en `agente_hw` es **opcional** (informativo; el .exe no lo usa para descargar).
-3. Descarga el nuevo `.exe` (validación: > 100 KB)
-4. Crea un `.bat` que detiene el servicio, reemplaza el archivo y lo reinicia
+2. **AgenteBacar** lee la URL desde **`config/agente_hw.url`**; si no hay, usa **`config/agente.url`** (legacy). Campos opcionales en `agente_hw`: **`version`** (informativo) y **`sha256`** (para validación criptográfica y evitar binarios corruptos o interceptados).
+3. Descarga el nuevo `.exe` (validaciones: tamaño > 100 KB y coincidencia estricta de **SHA256** si fue configurado).
+4. Crea un script `.bat` inteligente con reintentos (tolera demoras de I/O en discos lentos) que detiene el servicio, reemplaza el archivo y lo reinicia.
 5. El batch se ejecuta de forma desatachada y se autoeliminа
 
 ### Dónde vive la versión y cómo comprobarla
@@ -121,12 +121,12 @@ El script **une** `computadoras` y `tareas` por UUID. Si **`version_agente`** co
 ## Sincronización con Firebase
 
 - **Primera sync**: envío completo con `.set()`
-- **Syncs posteriores**: actualizaciones incrementales con `.update()`, solo los campos modificados según su frecuencia
+- **Syncs posteriores**: actualizaciones incrementales con `.update()`. Utiliza un **sistema de hashing en memoria** (MD5) para comparar datos pesados antes de enviar, evitando escrituras innecesarias en Firestore y ahorrando costos.
 - **Colecciones usadas**:
   - `computadoras` — datos de cada PC (ID = UUID del motherboard)
   - `computadoras/{uuid}/programas` — subcolección con un doc por programa instalado (ID = slug del nombre + hash corto). Campos: `nombre`, `version`, `publisher`, `fecha_instalacion` (YYYY-MM-DD), `arquitectura` (`x64` / `x86` / `user`), `ultima_vez_visto`. Se refresca cada 60 min; los programas desinstalados se borran en el siguiente sync.
   - `tareas` — comandos remotos por UUID
-  - `config/agente_hw` — URL del `.exe` para **ACTUALIZAR_AGENTE** (y opcionalmente `version` sin `v`, informativa)
+  - `config/agente_hw` — URL del `.exe` para **ACTUALIZAR_AGENTE** (opcionalmente `version` informativa y `sha256` para seguridad).
   - `config/agente` — espejo opcional de solo `url` (compatibilidad; `set_agente_url` y el workflow lo mantienen al actualizar)
   - `logs_actualizaciones` — historial de comandos y del flujo **ACTUALIZAR_AGENTE**; cada documento tiene `evento`, `detalle` y opcionalmente **`contexto`** (mapa: URL, host, HTTP, bytes, SHA256, rutas, fase del error, etc.). Eventos típicos de actualización: `ACTUALIZAR_AGENTE_RECIBIDO`, `URL_ENCONTRADA`, `ACTUALIZACION_PROGRAMADA`, `DESCARGA_*`, `REEMPLAZO_*`, `CONFIG_AGENTE_SIN_URL`, `ACTUALIZAR_AGENTE_ERROR` (también reflejado en `tareas.resultado_updates` con `fase` y `contexto`).
 

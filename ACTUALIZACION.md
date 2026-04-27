@@ -31,11 +31,12 @@ El `.exe` queda en **`dist\AgenteBacar.exe`**.
 
 ## 3. Actualizar la URL en Firebase (AgenteBacar)
 
-Documento **`config/agente_hw`** (`url` obligatoria; `version` opcional). Se espeja `url` en **`config/agente`** para compatibilidad.
+Documento **`config/agente_hw`** (`url` obligatoria; `version` y `sha256` opcionales). Se espeja `url` en **`config/agente`** para compatibilidad.
 
 ```bat
 python set_agente_url.py "https://tu-url/AgenteBacar.exe"
 python set_agente_url.py "https://tu-url/AgenteBacar.exe" "2.4.0"
+python set_agente_url.py "https://tu-url/AgenteBacar.exe" "2.4.0" "hash_sha256_del_archivo"
 ```
 
 Si usás **GitHub Actions**, podés dejar que el job opcional actualice Firestore (`actualizar_firestore: si`) o poner **no** y hacer este paso a mano.

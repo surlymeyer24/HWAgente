@@ -171,14 +171,14 @@ if RUNNING_AS_SERVICE:
                     if h_update is not None and rc == win32event.WAIT_OBJECT_0 + 1 and not _exe_empaquetado:
                         try:
                             from src.database.firebase_client import (
-                                _url_actualizacion_pendiente,
+                                _info_actualizacion_pendiente,
                                 log_debug,
                             )
                             log_debug(
                                 "ACTUALIZAR_AGENTE: evento Win32 recibido pero el proceso no es ejecutable "
                                 "empaquetado (sin frozen/_MEIPASS); se descarta URL pendiente."
                             )
-                            _url_actualizacion_pendiente()
+                            _info_actualizacion_pendiente()
                         except Exception:
                             pass
                         continue
@@ -189,11 +189,14 @@ if RUNNING_AS_SERVICE:
                     ):
                         try:
                             from src.database.firebase_client import (
-                                _url_actualizacion_pendiente,
+                                _info_actualizacion_pendiente,
                                 log_debug,
                             )
                             from src.core.auto_update import download_and_apply_update
-                            url = _url_actualizacion_pendiente()
+                            info_actualizacion = _info_actualizacion_pendiente()
+                            url = info_actualizacion.get("url")
+                            sha256 = info_actualizacion.get("sha256")
+
                             if not url:
                                 try:
                                     from src.database.firebase_client import log_debug
@@ -205,6 +208,7 @@ if RUNNING_AS_SERVICE:
                                 url,
                                 uuid=datos.get("uuid"),
                                 hostname=datos.get("hostname"),
+                                sha256_esperado=sha256
                             ):
                                 log_debug("Actualizacion programada; reinicio en breve.")
                                 self.running = False

@@ -1,14 +1,15 @@
 import firebase_admin
 from firebase_admin import credentials, firestore
 import json
+import hashlib
 import os
 import platform
 import sys
 import time
 from urllib.parse import urlparse
 
-# Para ACTUALIZAR_AGENTE: el listener escribe aquí la URL y despierta al bucle
-_url_actualizacion_pendiente_list = [None]
+# Para ACTUALIZAR_AGENTE: el listener escribe aquí la información y despierta al bucle
+_info_actualizacion_pendiente_list = [{}]
 
 # Referencia fuerte al Watch de Firestore (si se pierde, el listener puede cortarse por GC)
 _tareas_snapshot_watch = None
@@ -17,6 +18,10 @@ _tareas_snapshot_watch = None
 CONFIG_DOC_AGENTE_HW = "agente_hw"
 CONFIG_DOC_AGENTE_LEGACY = "agente"
 
+def _info_actualizacion_pendiente():
+    info = _info_actualizacion_pendiente_list[0]
+    _info_actualizacion_pendiente_list[0] = {}
+    return info
 
 def _leer_url_y_meta_actualizacion_agente():
     """
@@ -30,11 +35,14 @@ def _leer_url_y_meta_actualizacion_agente():
     url = ""
     version_publicada = None
     origen = None
+    sha256_esperado = None
     if cfg_hw:
         d = doc_hw.to_dict() or {}
         url = (d.get("url") or "").strip()
         vp = (d.get("version") or "").strip()
         version_publicada = vp if vp else None
+        sha2 = (d.get("sha256") or "").strip()
+        sha256_esperado = sha2.lower() if sha2 else None
         if url:
             origen = CONFIG_DOC_AGENTE_HW
     if not url and cfg_legacy:
@@ -45,6 +53,7 @@ def _leer_url_y_meta_actualizacion_agente():
     meta = {
         "origen_config": origen,
         "version_publicada_config": version_publicada,
+        "sha256_esperado": sha256_esperado,
         "config_agente_hw_existe": cfg_hw,
         "config_agente_legacy_existe": cfg_legacy,
     }
@@ -52,8 +61,10 @@ def _leer_url_y_meta_actualizacion_agente():
 
 
 def _url_actualizacion_pendiente():
-    u = _url_actualizacion_pendiente_list[0]
-    _url_actualizacion_pendiente_list[0] = None
+    # Fallback legacy
+    u = _info_actualizacion_pendiente_list[0].get("url")
+    if u:
+        _info_actualizacion_pendiente_list[0] = {}
     return u
 
 def _obtener_hostname():
@@ -88,7 +99,7 @@ def _verificar_y_reparar_conectividad():
 
     def _puede_conectar():
         try:
-            urllib.request.urlopen("https://www.google.com", timeout=5)
+            urllib.request.urlopen("https://firestore.googleapis.com", timeout=5)
             return True
         except Exception:
             return False
@@ -448,6 +459,15 @@ _contadores = {
     'ultima_sync_programas': 0
 }
 
+_hashes_memoria = {}
+
+def _obtener_hash(dato):
+    """Calcula un hash MD5 de un diccionario/lista para detectar cambios y evitar escrituras innecesarias."""
+    try:
+        return hashlib.md5(json.dumps(dato, sort_keys=True, default=str).encode('utf-8')).hexdigest()
+    except Exception:
+        return None
+
 
 def sincronizar_programas_instalados(uuid_pc, programas):
     """
@@ -541,6 +561,15 @@ def enviar_datos_pc(datos, forzar_completo=False):
             if programas is not None:
                 sincronizar_programas_instalados(document_id, programas)
                 _contadores['ultima_sync_programas'] = tiempo_actual
+        _contadores['ultima_sync_perifericos'] = tiempo_actual
+        _contadores['ultima_sync_updates'] = tiempo_actual
+        _contadores['ultima_sync_software'] = tiempo_actual
+        
+        # Guardar hashes iniciales
+        for key in ["aplicaciones_activas", "errores_recientes", "perifericos", "windows_updates", "software_critico"]:
+            if key in datos:
+                _hashes_memoria[key] = _obtener_hash(datos[key])
+                
             log_debug(f"Sincronización COMPLETA: {document_id}")
             log_centralizado("Info", "Sync", f"Sincronización COMPLETA: {document_id}")
             return
@@ -779,10 +808,14 @@ def escuchar_comandos_remotos(uuid_pc, evento_actualizar=None):
                                 "config_agente_legacy_existe"
                             ),
                             "version_publicada_config": cfg_meta.get("version_publicada_config"),
+                            "sha256_esperado": cfg_meta.get("sha256_esperado"),
                             "longitud_url": len(url),
                         },
                     )
-                    _url_actualizacion_pendiente_list[0] = url
+                    _info_actualizacion_pendiente_list[0] = {
+                        "url": url, 
+                        "sha256": cfg_meta.get("sha256_esperado")
+                    }
                     if evento_actualizar is not None:
                         try:
                             import win32event
@@ -903,7 +936,7 @@ def exportar_estado_firestore():
     return estado
 
 
-def configurar_url_actualizacion_agente(url, version=None):
+def configurar_url_actualizacion_agente(url, version=None, sha256=None):
     """
     Escribe config/agente_hw (AgenteBacar): url obligatoria, version opcional (informativa en consola).
     Duplica url en config/agente para compatibilidad con despliegues que solo lean el doc legacy.
@@ -916,6 +949,10 @@ def configurar_url_actualizacion_agente(url, version=None):
         v = str(version).strip().lstrip("v")
         if v:
             data_hw["version"] = v
+    if sha256 is not None:
+        s = str(sha256).strip().lower()
+        if s:
+            data_hw["sha256"] = s
     db.collection("config").document(CONFIG_DOC_AGENTE_HW).set(data_hw, merge=True)
     db.collection("config").document(CONFIG_DOC_AGENTE_LEGACY).set({"url": url}, merge=True)
     log_debug(

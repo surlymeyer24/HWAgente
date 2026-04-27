@@ -18,7 +18,7 @@ SERVICIO_NOMBRE = "AgenteMonitoreo"
 _MIN_BYTES_EXE = 100000
 
 
-def download_and_apply_update(url, uuid=None, hostname=None):
+def download_and_apply_update(url, uuid=None, hostname=None, sha256_esperado=None):
     """
     Descarga el .exe desde url, escribe un .bat que para el servicio,
     reemplaza el exe y arranca de nuevo. Lanza el .bat desacoplado y retorna True.
@@ -43,6 +43,7 @@ def download_and_apply_update(url, uuid=None, hostname=None):
         p = urlparse(url or "")
         return {
             "url_completa": url or "",
+            "sha256_esperado": sha256_esperado,
             "url_scheme": p.scheme or "",
             "url_host": p.netloc or "",
             "url_path": (p.path or "")[:300],
@@ -159,6 +160,24 @@ def download_and_apply_update(url, uuid=None, hostname=None):
         return False
 
     sha_hex = sha.hexdigest()
+
+    if sha256_esperado:
+        if sha_hex.lower() != sha256_esperado.lower():
+            _fail(
+                "DESCARGA_ARCHIVO_INVALIDO",
+                f"El SHA256 del archivo descargado ({sha_hex}) no coincide con el esperado ({sha256_esperado}). Posible binario corrupto o interceptado.",
+                {
+                    "sha256_calculado": sha_hex,
+                    "sha256_esperado": sha256_esperado,
+                    "bytes_descargados": nbytes,
+                },
+            )
+            try:
+                os.remove(nuevo_exe)
+            except Exception:
+                pass
+            return False
+
     if not os.path.isfile(nuevo_exe) or nbytes < _MIN_BYTES_EXE:
         tam = os.path.getsize(nuevo_exe) if os.path.isfile(nuevo_exe) else 0
         _fail(
@@ -191,33 +210,28 @@ def download_and_apply_update(url, uuid=None, hostname=None):
     from src.database.firebase_client import FLAG_POST_AGENT_UPDATE
 
     flag_path = os.path.join(carpeta, FLAG_POST_AGENT_UPDATE)
-    espera_ping = 6
+    espera_ping = 3
     bat_lines = [
         "@echo off",
         f"ping 127.0.0.1 -n {espera_ping + 1} > nul",
-        f'sc stop "{SERVICIO_NOMBRE}"',
-        "timeout /t 5 /nobreak > nul",
-        # Forzar terminación si el proceso sigue vivo
+        f'sc stop "{SERVICIO_NOMBRE}" >nul 2>&1',
+        "set /a INTENTOS=0",
+        ":loop",
+        "set /a INTENTOS+=1",
         f'taskkill /IM "{nombre_exe}" /F >nul 2>&1',
-        "timeout /t 3 /nobreak > nul",
-        # Reintentar copy hasta 3 veces (el exe puede tardar en liberarse)
-        f'copy /Y "{nuevo_exe}" "{exe_actual}"',
+        "timeout /t 2 /nobreak > nul",
+        f'copy /Y "{nuevo_exe}" "{exe_actual}" >nul 2>&1',
         "if not errorlevel 1 goto :copy_ok",
-        "timeout /t 5 /nobreak > nul",
-        f'copy /Y "{nuevo_exe}" "{exe_actual}"',
-        "if not errorlevel 1 goto :copy_ok",
-        "timeout /t 5 /nobreak > nul",
-        f'copy /Y "{nuevo_exe}" "{exe_actual}"',
-        "if not errorlevel 1 goto :copy_ok",
-        # Si los 3 intentos fallaron, arrancar el servicio con el exe viejo
-        f'sc start "{SERVICIO_NOMBRE}"',
+        "if %INTENTOS% LSS 15 goto :loop",
+        # Falló tras los intentos, reanuda el servicio viejo
+        f'sc start "{SERVICIO_NOMBRE}" >nul 2>&1',
         "goto :cleanup",
         ":copy_ok",
         f'type nul > "{flag_path}"',
-        f'sc start "{SERVICIO_NOMBRE}"',
+        f'sc start "{SERVICIO_NOMBRE}" >nul 2>&1',
         ":cleanup",
-        f'del /F /Q "{nuevo_exe}"',
-        "del /F /Q \"%~f0\"",
+        f'del /F /Q "{nuevo_exe}" >nul 2>&1',
+        '(goto) 2>nul & del "%~f0"',
     ]
     bat_content = "\r\n".join(bat_lines)
     fd, bat_path = tempfile.mkstemp(suffix=".bat", prefix="agente_update_", text=True)
@@ -248,7 +262,7 @@ def download_and_apply_update(url, uuid=None, hostname=None):
         )
         _log_ok(
             "REEMPLAZO_INICIADO",
-            f".bat lanzado (desacoplado): espera ~{espera_ping}s, sc stop, copy al exe en uso, flag si copy OK, sc start, borra _new y el .bat.",
+            f".bat lanzado (desacoplado): espera {espera_ping}s, sc stop, bucle de reintentos inteligente para copiar, flag si copy OK, sc start, auto-borrado.",
             {
                 "bat_path_temp": bat_path,
                 "espera_inicial_seg": espera_ping,
