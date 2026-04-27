@@ -64,7 +64,7 @@ jobs:
           python-version: '3.11'
 
       - name: Install dependencies
-        run: pip install firebase-admin pywin32 psutil requests wmi pyinstaller
+        run: pip install firebase-admin pywin32 psutil requests wmi pyinstaller ecdsa
 
       - name: Decode Firebase credentials
         shell: bash

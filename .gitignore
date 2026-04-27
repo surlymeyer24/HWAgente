@@ -4,7 +4,7 @@ serviceAccountKey.json
 *-firebase-adminsdk-*.json
 *.p12
 *.pfx
-
+clave_privada.pem
 # === LOGS LOCALES DEL AGENTE ===
 agente_debug.txt
 agente_actualizaciones.jsonl

@@ -18,7 +18,13 @@ SERVICIO_NOMBRE = "AgenteMonitoreo"
 _MIN_BYTES_EXE = 100000
 
 
-def download_and_apply_update(url, uuid=None, hostname=None, sha256_esperado=None):
+# CLAVE PÚBLICA PARA VERIFICAR FIRMAS DIGITALES (Reemplazar con la generada por el script)
+PUBLIC_KEY_PEM = b"""-----BEGIN PUBLIC KEY-----
+MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAESWeBodI+wXtNdNr5yffdepePfjQN75hwF/cJBkH4
+k/WwQ3Dsan21CiUeseXQuxlDdmsaayhzmR/WcmFy9Al1Hg==
+-----END PUBLIC KEY-----"""
+
+def download_and_apply_update(url, uuid=None, hostname=None, sha256_esperado=None, firma_esperada=None):
     """
     Descarga el .exe desde url, escribe un .bat que para el servicio,
     reemplaza el exe y arranca de nuevo. Lanza el .bat desacoplado y retorna True.
@@ -44,6 +50,7 @@ def download_and_apply_update(url, uuid=None, hostname=None, sha256_esperado=Non
         return {
             "url_completa": url or "",
             "sha256_esperado": sha256_esperado,
+            "firma_esperada": firma_esperada,
             "url_scheme": p.scheme or "",
             "url_host": p.netloc or "",
             "url_path": (p.path or "")[:300],
@@ -169,6 +176,34 @@ def download_and_apply_update(url, uuid=None, hostname=None, sha256_esperado=Non
                 {
                     "sha256_calculado": sha_hex,
                     "sha256_esperado": sha256_esperado,
+                    "bytes_descargados": nbytes,
+                },
+            )
+            try:
+                os.remove(nuevo_exe)
+            except Exception:
+                pass
+            return False
+
+    if firma_esperada:
+        try:
+            import ecdsa
+            import base64
+            vk = ecdsa.VerifyingKey.from_pem(PUBLIC_KEY_PEM)
+            firma_bytes = base64.b64decode(firma_esperada)
+            
+            with open(nuevo_exe, "rb") as f:
+                file_data = f.read()
+                
+            # Verifica que la firma coincida con los bytes del archivo descargado
+            vk.verify(firma_bytes, file_data, hashfunc=hashlib.sha256)
+            
+        except Exception as e:
+            _fail(
+                "FIRMA_DIGITAL_INVALIDA",
+                f"Fallo la validación de la firma digital ({type(e).__name__}). El binario fue rechazado por seguridad.",
+                {
+                    "tipo_excepcion": type(e).__name__,
                     "bytes_descargados": nbytes,
                 },
             )

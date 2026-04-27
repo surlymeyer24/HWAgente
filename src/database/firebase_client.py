@@ -43,6 +43,8 @@ def _leer_url_y_meta_actualizacion_agente():
         version_publicada = vp if vp else None
         sha2 = (d.get("sha256") or "").strip()
         sha256_esperado = sha2.lower() if sha2 else None
+        fm = (d.get("firma") or "").strip()
+        firma_esperada = fm if fm else None
         if url:
             origen = CONFIG_DOC_AGENTE_HW
     if not url and cfg_legacy:
@@ -54,6 +56,7 @@ def _leer_url_y_meta_actualizacion_agente():
         "origen_config": origen,
         "version_publicada_config": version_publicada,
         "sha256_esperado": sha256_esperado,
+        "firma_esperada": firma_esperada,
         "config_agente_hw_existe": cfg_hw,
         "config_agente_legacy_existe": cfg_legacy,
     }
@@ -166,6 +169,23 @@ def _guardar_machine_id_registro(machine_id: str) -> None:
         log_debug(f"No se pudo guardar machine_id en registro: {e}")
 
 
+def _obtener_identificador_unico_adicional() -> str:
+    """Obtiene un identificador único (MachineGuid o MAC) para evitar colisiones con UUIDs genéricos."""
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Cryptography") as k:
+            val, _ = winreg.QueryValueEx(k, "MachineGuid")
+            if val and val.strip():
+                return val.strip().lower()
+    except Exception:
+        pass
+    try:
+        import uuid
+        return f"{uuid.getnode():012x}"
+    except Exception:
+        import random
+        return f"{random.randint(10000000, 99999999)}"
+
 def resolver_machine_id(uuid_hardware: str, hostname: str) -> str:
     """
     Devuelve el ID definitivo de esta máquina para Firestore.
@@ -201,7 +221,8 @@ def resolver_machine_id(uuid_hardware: str, hostname: str) -> str:
         if doc.exists:
             hostname_existente = (doc.to_dict() or {}).get("hostname", "")
             if hostname_existente and hostname_existente.lower() != hostname.lower():
-                id_alternativo = f"{hostname}_{uuid_hardware[:8]}".lower()
+                sufijo_unico = _obtener_identificador_unico_adicional()
+                id_alternativo = f"{hostname}_{sufijo_unico[:8]}".lower()
                 log_debug(
                     f"resolver_machine_id: COLISION — uuid={uuid_hardware} pertenece a "
                     f"'{hostname_existente}'. Este equipo ({hostname}) usará '{id_alternativo}'"
@@ -236,6 +257,11 @@ def resolver_machine_id(uuid_hardware: str, hostname: str) -> str:
             data = doc.to_dict() or {}
             if data.get("hostname", "").lower() == hostname.lower():
                 id_recuperado = doc.id
+                sufijo_actual = _obtener_identificador_unico_adicional()[:8]
+                # Evitar robar el ID de otra máquina en caso de UUID genérico + mismo hostname
+                if "_" in id_recuperado and sufijo_actual not in id_recuperado:
+                    continue
+                
                 log_debug(
                     f"resolver_machine_id: doc recuperado por uuid_hardware "
                     f"→ {id_recuperado}"
@@ -561,19 +587,19 @@ def enviar_datos_pc(datos, forzar_completo=False):
             if programas is not None:
                 sincronizar_programas_instalados(document_id, programas)
                 _contadores['ultima_sync_programas'] = tiempo_actual
-        _contadores['ultima_sync_perifericos'] = tiempo_actual
-        _contadores['ultima_sync_updates'] = tiempo_actual
-        _contadores['ultima_sync_software'] = tiempo_actual
-        
-        # Guardar hashes iniciales
-        for key in ["aplicaciones_activas", "errores_recientes", "perifericos", "windows_updates", "software_critico"]:
-            if key in datos:
-                _hashes_memoria[key] = _obtener_hash(datos[key])
-                
+            _contadores['ultima_sync_perifericos'] = tiempo_actual
+            _contadores['ultima_sync_updates'] = tiempo_actual
+            _contadores['ultima_sync_software'] = tiempo_actual
+
+            # Guardar hashes iniciales (solo sync completa)
+            for key in ["aplicaciones_activas", "errores_recientes", "perifericos", "windows_updates", "software_critico"]:
+                if key in datos:
+                    _hashes_memoria[key] = _obtener_hash(datos[key])
+
             log_debug(f"Sincronización COMPLETA: {document_id}")
             log_centralizado("Info", "Sync", f"Sincronización COMPLETA: {document_id}")
             return
-        
+
         # Sincronizaciones posteriores → INCREMENTALES
         actualizacion = {
             "cpu_uso_porcentaje": datos.get("cpu_uso_porcentaje"),
@@ -809,12 +835,14 @@ def escuchar_comandos_remotos(uuid_pc, evento_actualizar=None):
                             ),
                             "version_publicada_config": cfg_meta.get("version_publicada_config"),
                             "sha256_esperado": cfg_meta.get("sha256_esperado"),
+                            "firma_esperada": cfg_meta.get("firma_esperada"),
                             "longitud_url": len(url),
                         },
                     )
                     _info_actualizacion_pendiente_list[0] = {
                         "url": url, 
-                        "sha256": cfg_meta.get("sha256_esperado")
+                        "sha256": cfg_meta.get("sha256_esperado"),
+                        "firma": cfg_meta.get("firma_esperada")
                     }
                     if evento_actualizar is not None:
                         try:
@@ -991,7 +1019,7 @@ def exportar_estado_firestore():
     return estado
 
 
-def configurar_url_actualizacion_agente(url, version=None, sha256=None):
+def configurar_url_actualizacion_agente(url, version=None, sha256=None, firma=None):
     """
     Escribe config/agente_hw (AgenteBacar): url obligatoria, version opcional (informativa en consola).
     Duplica url en config/agente para compatibilidad con despliegues que solo lean el doc legacy.
@@ -1008,6 +1036,10 @@ def configurar_url_actualizacion_agente(url, version=None, sha256=None):
         s = str(sha256).strip().lower()
         if s:
             data_hw["sha256"] = s
+    if firma is not None:
+        f = str(firma).strip()
+        if f:
+            data_hw["firma"] = f
     db.collection("config").document(CONFIG_DOC_AGENTE_HW).set(data_hw, merge=True)
     db.collection("config").document(CONFIG_DOC_AGENTE_LEGACY).set({"url": url}, merge=True)
     log_debug(

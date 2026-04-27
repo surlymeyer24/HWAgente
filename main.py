@@ -196,6 +196,7 @@ if RUNNING_AS_SERVICE:
                             info_actualizacion = _info_actualizacion_pendiente()
                             url = info_actualizacion.get("url")
                             sha256 = info_actualizacion.get("sha256")
+                            firma = info_actualizacion.get("firma")
 
                             if not url:
                                 try:
@@ -208,7 +209,8 @@ if RUNNING_AS_SERVICE:
                                 url,
                                 uuid=datos.get("uuid"),
                                 hostname=datos.get("hostname"),
-                                sha256_esperado=sha256
+                                sha256_esperado=sha256,
+                                firma_esperada=firma
                             ):
                                 log_debug("Actualizacion programada; reinicio en breve.")
                                 self.running = False
