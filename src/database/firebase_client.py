@@ -887,6 +887,61 @@ def escuchar_comandos_remotos(uuid_pc, evento_actualizar=None):
                     "fecha_comando_ejecutado": firestore.SERVER_TIMESTAMP
                 })
 
+        elif comando == "RESETEAR_ID":
+            log_debug("Comando recibido: RESETEAR_ID")
+            log_centralizado("Info", "Comando", f"Comando recibido: RESETEAR_ID (host {hn})")
+            registrar_log_actualizacion(
+                "RESETEAR_ID",
+                f"Reinicio de ID solicitado (host {hn}). Se borrará el registro y se reiniciará el servicio.",
+                uuid=uuid_pc,
+                hostname=hn,
+            )
+            tareas_ref.update({"comando": "RESETEANDO_ID..."})
+            
+            try:
+                import winreg
+                with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, _REGISTRY_KEY, 0, winreg.KEY_ALL_ACCESS) as k:
+                    winreg.DeleteValue(k, _REGISTRY_VALUE)
+                log_debug("machine_id borrado del registro exitosamente.")
+            except Exception as e:
+                log_debug(f"Aviso al borrar registro (puede no existir): {e}")
+
+            import tempfile
+            import subprocess
+            bat_lines = [
+                "@echo off",
+                "ping 127.0.0.1 -n 4 > nul",
+                'sc stop "AgenteMonitoreo" >nul 2>&1',
+                "ping 127.0.0.1 -n 4 > nul",
+                'sc start "AgenteMonitoreo" >nul 2>&1',
+                '(goto) 2>nul & del "%~f0"'
+            ]
+            bat_content = "\r\n".join(bat_lines)
+            try:
+                fd, bat_path = tempfile.mkstemp(suffix=".bat", prefix="agente_reset_", text=True)
+                os.write(fd, bat_content.encode("utf-8"))
+                os.close(fd)
+                
+                DETACHED_PROCESS = 0x00000008
+                CREATE_NO_WINDOW = 0x08000000
+                subprocess.Popen(
+                    ["cmd", "/c", bat_path],
+                    creationflags=DETACHED_PROCESS | CREATE_NO_WINDOW,
+                    close_fds=True,
+                    cwd=os.path.dirname(bat_path),
+                )
+                tareas_ref.update({
+                    "comando": "RESET_PROGRAMADO",
+                    "fecha_comando_ejecutado": firestore.SERVER_TIMESTAMP
+                })
+            except Exception as e:
+                log_debug(f"Error programando reinicio: {e}")
+                tareas_ref.update({
+                    "comando": "RESETEAR_ID_ERROR",
+                    "resultado_updates": {"estado": "error", "mensaje": str(e)},
+                    "fecha_comando_ejecutado": firestore.SERVER_TIMESTAMP
+                })
+
     _tareas_snapshot_watch = tareas_ref.on_snapshot(on_snapshot)
 
 

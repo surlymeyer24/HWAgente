@@ -50,6 +50,18 @@ function ComandosMaquina({
   onToggleSeleccion: () => void;
 }) {
   const { enviarActualizarDatos, enviarActualizarAgente, sending, error } = useComandoHW(computadoraId);
+  const [enviandoReset, setEnviandoReset] = useState(false);
+  const [errorReset, setErrorReset] = useState<string | null>(null);
+
+  async function handleReset() {
+    if (!window.confirm(`¿Enviar RESETEAR_ID a ${hostname || computadoraId}?\n\nEl agente borrará su ID del registro de Windows y se reiniciará con un ID limpio generado desde el hardware.`)) return;
+    setEnviandoReset(true);
+    setErrorReset(null);
+    const res = await enviarComandoAMaquinas([computadoraId], 'RESETEAR_ID');
+    setEnviandoReset(false);
+    if (!res.ok) setErrorReset(res.message);
+  }
+
   return (
     <div
       className="comandos-hw"
@@ -85,7 +97,7 @@ function ComandosMaquina({
         <button
           type="button"
           className="btn btn-secondary btn-sm"
-          disabled={sending}
+          disabled={sending || enviandoReset}
           onClick={() => enviarActualizarDatos()}
         >
           Actualizar datos
@@ -93,19 +105,28 @@ function ComandosMaquina({
         <button
           type="button"
           className="btn btn-primary btn-sm"
-          disabled={sending}
+          disabled={sending || enviandoReset}
           onClick={() => enviarActualizarAgente()}
         >
           Actualizar agente
         </button>
+        <button
+          type="button"
+          className="btn btn-secondary btn-sm"
+          style={{ color: '#dc3545', borderColor: '#dc3545' }}
+          disabled={sending || enviandoReset}
+          onClick={() => void handleReset()}
+        >
+          {enviandoReset ? 'Enviando...' : 'Resetear ID'}
+        </button>
       </div>
-      {error && (
+      {(error || errorReset) && (
         <p
           className="error small"
           style={{ flexBasis: '100%', marginBottom: 0 }}
           onClick={(e) => e.stopPropagation()}
         >
-          {error}
+          {error || errorReset}
         </p>
       )}
     </div>
@@ -126,6 +147,7 @@ export function Tareas() {
   const [idsAgenteSeleccion, setIdsAgenteSeleccion] = useState<Set<string>>(() => new Set());
   const [enviandoAgenteSeleccion, setEnviandoAgenteSeleccion] = useState(false);
   const [errorAgenteSeleccion, setErrorAgenteSeleccion] = useState<string | null>(null);
+  const [enviandoResetSeleccion, setEnviandoResetSeleccion] = useState(false);
 
   const rangoFechasInvalido = Boolean(
     logFechaDesde && logFechaHasta && logFechaDesde > logFechaHasta
@@ -250,6 +272,27 @@ export function Tareas() {
     }
   }
 
+  async function handleResetearIdSeleccionadas() {
+    const ids = [...idsAgenteSeleccion];
+    const n = ids.length;
+    if (n === 0) return;
+    if (
+      !window.confirm(
+        `¿Enviar RESETEAR_ID a ${n} máquina${n !== 1 ? 's' : ''} seleccionada${n !== 1 ? 's' : ''}?\n\n` +
+          'Los agentes borrarán su ID del registro de Windows y se reiniciarán para generar uno nuevo. Usar solo en caso de colisiones o IDs atascados.'
+      )
+    ) {
+      return;
+    }
+    setErrorAgenteSeleccion(null);
+    setEnviandoResetSeleccion(true);
+    const res = await enviarComandoAMaquinas(ids, 'RESETEAR_ID');
+    setEnviandoResetSeleccion(false);
+    if (!res.ok) {
+      setErrorAgenteSeleccion(res.message);
+    }
+  }
+
   if (loading) {
     return (
       <div className="page">
@@ -325,6 +368,17 @@ export function Tareas() {
                 {enviandoAgenteSeleccion
                   ? 'Enviando ACTUALIZAR_AGENTE…'
                   : `Actualizar agente en seleccionadas (${idsAgenteSeleccion.size})`}
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                style={{ color: '#dc3545', borderColor: '#dc3545' }}
+                disabled={idsAgenteSeleccion.size === 0 || enviandoResetSeleccion}
+                onClick={() => void handleResetearIdSeleccionadas()}
+              >
+                {enviandoResetSeleccion
+                  ? 'Enviando RESETEAR_ID…'
+                  : `Resetear ID en seleccionadas (${idsAgenteSeleccion.size})`}
               </button>
             </div>
             {errorActualizarTodas && (

@@ -64,6 +64,7 @@ Los comandos se envían desde el frontend escribiendo en el documento `tareas/{u
 | `ACTUALIZAR_DATOS` | Fuerza una sync completa inmediata |
 | `INSTALAR_UPDATES` | Instala todas las actualizaciones de Windows pendientes |
 | `ACTUALIZAR_AGENTE` | Descarga y reemplaza el `.exe` desde la URL configurada en Firestore |
+| `RESETEAR_ID` | Borra la caché local del UUID en el Registro y reinicia el servicio para forzar un nuevo ID limpio |
 
 ### Auto-actualización
 
