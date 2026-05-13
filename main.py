@@ -3,9 +3,15 @@ import sys
 import subprocess
 import os
 
+# --- 0. ENTORNO DE DESARROLLO (debe ir ANTES de cualquier import de Firebase) ---
+from dotenv import load_dotenv
+load_dotenv(".env.development") # carga .env.development si existe, no hace nada si no hay .env
+# FIRESTORE_EMULATOR_HOST se setea automáticamente desde el .env;
+# Firebase Admin SDK la detecta solo — no necesitás código extra.
+
 # --- 1. PREVENCIÓN DE ERRORES EN MODO INVISIBLE ---
-# Se define antes que nada para evitar crasheos por falta de consola 
 from config.config import DEBUG_MODE
+
 if getattr(sys, 'frozen', False) and not DEBUG_MODE:
     sys.stdin = None
     sys.stdout = open(os.devnull, 'w', encoding='utf-8')
@@ -232,7 +238,9 @@ if RUNNING_AS_SERVICE:
                             except Exception:
                                 pass
                         continue
-                    enviar_datos_pc(obtener_datos_pc())
+                    datos_ciclo = obtener_datos_pc()
+                    datos_ciclo["uuid"] = uuid_final
+                    enviar_datos_pc(datos_ciclo)
                     
             except Exception as e:
                 log_arranque(f"SVCRUN_ERROR — {type(e).__name__}: {e}")
@@ -261,6 +269,27 @@ if __name__ == "__main__":
             sys.exit(0)
         except:
             pass  # Si falla, continúa al Caso C
+
+    if "--dev" in sys.argv:
+        print("FIRESTORE_EMULATOR_HOST:", os.getenv("FIRESTORE_EMULATOR_HOST"))
+        print("Importando firebase_client...")
+        from src.database.firebase_client import (
+            enviar_datos_pc, escuchar_comandos_remotos,
+            resolver_machine_id, set_machine_uuid
+        )
+        print("Importando scanner...")
+        from src.core.scanner import obtener_datos_pc
+        print("Obteniendo datos PC...")
+        datos = obtener_datos_pc()
+        print("Resolviendo machine ID...")
+        uuid_final = resolver_machine_id(datos.get("uuid", ""), datos.get("hostname", ""))
+        datos["uuid"] = uuid_final
+        set_machine_uuid(uuid_final)
+        print("Enviando datos...")
+        enviar_datos_pc(datos)
+        print("Listo.")
+        input("Agente corriendo en modo dev. Enter para salir...")
+        sys.exit(0)
 
     # Caso C: Usuario ejecuta el .exe con doble clic
     if not servicio_esta_instalado():

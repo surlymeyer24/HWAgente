@@ -36,6 +36,7 @@ export_project.ps1
 # === VARIABLES DE ENTORNO ===
 .env
 .env.*
+.env.development
 
 # === ARCHIVOS TEMPORALES ===
 Untitled

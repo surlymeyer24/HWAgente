@@ -1,5 +1,6 @@
 import firebase_admin
 from firebase_admin import credentials, firestore
+from google.api_core import exceptions as google_api_exceptions
 import json
 import hashlib
 import os
@@ -414,7 +415,6 @@ if not firebase_admin._apps:
 
 db = firestore.client()
 
-
 def fallo_actualizacion_agente_remota(uuid_pc, hostname, evento, detalle, contexto=None):
     """
     Tras ACTUALIZACION_PROGRAMADA: si falla descarga/reemplazo, deja trazas claras y
@@ -486,6 +486,56 @@ _contadores = {
 }
 
 _hashes_memoria = {}
+
+def _error_es_documento_inexistente(err):
+    """True si Firestore rechazó update porque no existe el documento (p. ej. borrado en consola o falló el primer set)."""
+    if isinstance(err, google_api_exceptions.NotFound):
+        return True
+    try:
+        import grpc
+        if isinstance(err, grpc.RpcError) and err.code() == grpc.StatusCode.NOT_FOUND:
+            return True
+    except (ImportError, AttributeError):
+        pass
+    msg = str(err).lower()
+    return "no document to update" in msg or (
+        "404" in msg and "document" in msg
+    )
+
+
+def _es_error_transitorio(err):
+    """True si es un error de red/Firebase transitorio (503, 504, red no disponible)."""
+    if isinstance(err, (google_api_exceptions.ServiceUnavailable,
+                        google_api_exceptions.DeadlineExceeded)):
+        return True
+    try:
+        import grpc
+        if isinstance(err, grpc.RpcError):
+            return err.code() in (grpc.StatusCode.UNAVAILABLE, grpc.StatusCode.DEADLINE_EXCEEDED)
+    except (ImportError, AttributeError):
+        pass
+    msg = str(err).lower()
+    return (
+        "503" in msg or "504" in msg
+        or "unavailable" in msg
+        or "deadline exceeded" in msg
+        or "network is unreachable" in msg
+        or "wsagetoverlappedresult" in msg
+    )
+
+
+def _ejecutar_con_reintento(fn, max_intentos=3, esperas=(5, 15, 30)):
+    """Ejecuta fn() reintentando ante errores transitorios de red/Firebase."""
+    for intento in range(max_intentos):
+        try:
+            return fn()
+        except Exception as e:
+            if not _es_error_transitorio(e) or intento == max_intentos - 1:
+                raise
+            espera = esperas[min(intento, len(esperas) - 1)]
+            log_debug(f"Error transitorio (intento {intento + 1}/{max_intentos}), reintentando en {espera}s: {e}")
+            time.sleep(espera)
+
 
 def _obtener_hash(dato):
     """Calcula un hash MD5 de un diccionario/lista para detectar cambios y evitar escrituras innecesarias."""
@@ -569,18 +619,22 @@ def enviar_datos_pc(datos, forzar_completo=False):
         if not document_id:
             return
         
-        _contadores['sincronizaciones_totales'] += 1
         tiempo_actual = time.time()
 
         # programas_instalados va a subcolección, nunca al doc principal
         programas = datos.pop("programas_instalados", None)
 
         # Primera sincronización o forzada → COMPLETA
-        if _contadores['sincronizaciones_totales'] == 1 or forzar_completo:
+        # El contador se incrementa DESPUÉS del set() exitoso; si falla, la próxima
+        # llamada también usará set() en lugar de update(), evitando 404.
+        if _contadores['sincronizaciones_totales'] == 0 or forzar_completo:
             datos["ultima_sincronizacion"] = firestore.SERVER_TIMESTAMP
             datos["version_agente"] = VERSION_AGENTE or "?"
             datos["estado_conexion"] = "ONLINE"
-            db.collection(FIREBASE_COLLECTION_NAME).document(document_id).set(datos, merge=True)
+            _ejecutar_con_reintento(
+                lambda: db.collection(FIREBASE_COLLECTION_NAME).document(document_id).set(datos, merge=True)
+            )
+            _contadores['sincronizaciones_totales'] += 1
             _contadores['ultima_sync_completa'] = tiempo_actual
             _contadores['ultima_sync_apps'] = tiempo_actual
             _contadores['ultima_sync_errores'] = tiempo_actual
@@ -601,6 +655,7 @@ def enviar_datos_pc(datos, forzar_completo=False):
             return
 
         # Sincronizaciones posteriores → INCREMENTALES
+        _contadores['sincronizaciones_totales'] += 1
         actualizacion = {
             "cpu_uso_porcentaje": datos.get("cpu_uso_porcentaje"),
             "ram_uso_porcentaje": datos.get("ram_uso_porcentaje"),
@@ -644,8 +699,28 @@ def enviar_datos_pc(datos, forzar_completo=False):
                 _contadores['ultima_sync_software'] = tiempo_actual
                 log_debug("Actualizando software critico")
 
-        db.collection(FIREBASE_COLLECTION_NAME).document(document_id).update(actualizacion)
-        log_debug(f"Sincronización incremental: {document_id}")
+        doc_ref = db.collection(FIREBASE_COLLECTION_NAME).document(document_id)
+        try:
+            _ejecutar_con_reintento(lambda: doc_ref.update(actualizacion))
+            log_debug(f"Sincronización incremental: {document_id}")
+        except Exception as upd_err:
+            if not _error_es_documento_inexistente(upd_err):
+                raise
+            log_debug(
+                f"update sin documento ({document_id}), recuperando con set(merge=True)"
+            )
+            recuperacion = dict(datos)
+            recuperacion.update(actualizacion)
+            recuperacion["ultima_sincronizacion"] = firestore.SERVER_TIMESTAMP
+            recuperacion["version_agente"] = VERSION_AGENTE or "?"
+            recuperacion["estado_conexion"] = "ONLINE"
+            if programas is not None:
+                recuperacion["programas_instalados"] = programas
+            _ejecutar_con_reintento(lambda: doc_ref.set(recuperacion, merge=True))
+            if programas is not None:
+                sincronizar_programas_instalados(document_id, programas)
+                _contadores["ultima_sync_programas"] = tiempo_actual
+            log_debug(f"Sincronización recuperada (set merge): {document_id}")
 
         # Programas instalados cada 60 min → subcolección computadoras/{uuid}/programas
         if (
@@ -722,6 +797,7 @@ def escuchar_comandos_remotos(uuid_pc, evento_actualizar=None):
             tareas_ref.update({"comando": "PROCESANDO..."})
             try:
                 nuevos_datos = obtener_datos_pc(incluir_pesados=True)
+                nuevos_datos["uuid"] = uuid_pc
                 enviar_datos_pc(nuevos_datos, forzar_completo=True)
                 tareas_ref.update({
                     "comando": "PROCESADO",
@@ -777,6 +853,7 @@ def escuchar_comandos_remotos(uuid_pc, evento_actualizar=None):
                     hostname=hn,
                 )
                 nuevos_datos = obtener_datos_pc(incluir_pesados=True)
+                nuevos_datos["uuid"] = uuid_pc
                 enviar_datos_pc(nuevos_datos, forzar_completo=True)
             except Exception as e:
                 log_debug(f"Error instalando updates: {e}")
