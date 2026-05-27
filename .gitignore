@@ -26,6 +26,14 @@ __pycache__/
 .idea/
 .cursor/
 .DS_Store
+.agents/
+skills-lock.json
+
+# === FIREBASE CLI (logs locales) ===
+firestore-debug.log
+ui-debug.log
+database-debug.log
+.firebase/logs/
 
 # === EXPORTACIONES / DUMPS ===
 firebase_dump.json
@@ -36,6 +44,7 @@ export_project.ps1
 # === VARIABLES DE ENTORNO ===
 .env
 .env.*
+.env.development
 
 # === ARCHIVOS TEMPORALES ===
 Untitled

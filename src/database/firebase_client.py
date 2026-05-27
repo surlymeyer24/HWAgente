@@ -1,5 +1,6 @@
 import firebase_admin
 from firebase_admin import credentials, firestore
+from google.api_core import exceptions as google_api_exceptions
 import json
 import hashlib
 import os
@@ -27,6 +28,9 @@ def _leer_url_y_meta_actualizacion_agente():
     """
     Prioridad: config/agente_hw (url + version opcional informativa),
     luego config/agente (solo url) para agentes antiguos / espejo manual.
+    La URL es validada antes de retornarse: si no pasa los controles de
+    seguridad (protocolo, dominio, IPs privadas), se retorna url="" y
+    se agrega 'url_rechazada_motivo' al dict meta.
     """
     doc_hw = db.collection("config").document(CONFIG_DOC_AGENTE_HW).get()
     doc_legacy = db.collection("config").document(CONFIG_DOC_AGENTE_LEGACY).get()
@@ -36,6 +40,7 @@ def _leer_url_y_meta_actualizacion_agente():
     version_publicada = None
     origen = None
     sha256_esperado = None
+    firma_esperada = None
     if cfg_hw:
         d = doc_hw.to_dict() or {}
         url = (d.get("url") or "").strip()
@@ -52,6 +57,20 @@ def _leer_url_y_meta_actualizacion_agente():
         url = (d.get("url") or "").strip()
         if url:
             origen = CONFIG_DOC_AGENTE_LEGACY
+
+    # --- Validación de seguridad de la URL ---
+    url_rechazada_motivo = None
+    if url:
+        try:
+            from src.core.auto_update import _validar_url_segura
+            motivo = _validar_url_segura(url)
+            if motivo:
+                url_rechazada_motivo = motivo
+                log_debug(f"_leer_url: URL rechazada por seguridad: {motivo} | url={url[:80]}")
+                url = ""  # No encolar una URL maliciosa
+        except Exception as e:
+            log_debug(f"_leer_url: error al validar URL: {e}")
+
     meta = {
         "origen_config": origen,
         "version_publicada_config": version_publicada,
@@ -60,6 +79,8 @@ def _leer_url_y_meta_actualizacion_agente():
         "config_agente_hw_existe": cfg_hw,
         "config_agente_legacy_existe": cfg_legacy,
     }
+    if url_rechazada_motivo:
+        meta["url_rechazada_motivo"] = url_rechazada_motivo
     return url, meta
 
 
@@ -110,7 +131,10 @@ def _verificar_y_reparar_conectividad():
     if _puede_conectar():
         return
 
-    log_debug("FIREWALL_CHECK — sin conectividad HTTPS saliente, intentando agregar regla de firewall")
+    log_debug(
+        "FIREWALL_CHECK — prueba HTTPS (urllib) a firestore.googleapis.com falló; "
+        "intentando regla de firewall (Firestore Admin usa gRPC/HTTP2: puede fallar aunque esto pase)"
+    )
 
     exe_path = sys.executable
     try:
@@ -134,7 +158,10 @@ def _verificar_y_reparar_conectividad():
     if _puede_conectar():
         log_debug("FIREWALL_CHECK — conectividad restaurada tras agregar regla")
     else:
-        log_debug("FIREWALL_CHECK — sin conectividad tras agregar regla (posible firewall corporativo o proxy)")
+        log_debug(
+            "FIREWALL_CHECK — la prueba HTTPS (urllib) sigue fallando "
+            "(firewall corporativo, proxy o TLS); el agente intentará Firestore por gRPC de todas formas"
+        )
 
 
 # UUID de la máquina, se setea desde main.py al arrancar
@@ -398,22 +425,79 @@ def _version_desde_exe_o_config():
 
 VERSION_AGENTE = _version_desde_exe_o_config()
 
+
+def _project_id_desde_service_account_json(path: str) -> str:
+    """project_id embebido en el JSON de la cuenta de servicio (sin red)."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+        pid = (data.get("project_id") or "").strip()
+        return pid or "?"
+    except Exception as e:
+        return f"?(error leyendo JSON: {e})"
+
+
+def _probar_rpc_firestore() -> None:
+    """
+    initialize_app() no hace llamadas a Firestore: el mensaje 'credenciales OK' no implica DB alcanzable.
+    Forzamos una lectura mínima para validar gRPC/TLS hacia Google (distinto del urllib del firewall).
+    """
+    pid = _project_id_desde_service_account_json(FIREBASE_JSON_PATH)
+    log_debug(
+        f"Firestore: comprobando RPC — proyecto_id={pid}, coleccion={FIREBASE_COLLECTION_NAME}"
+    )
+    try:
+        q = db.collection(FIREBASE_COLLECTION_NAME).limit(1)
+        try:
+            q.get(timeout=25.0)
+        except TypeError:
+            q.get()
+        log_debug("Firestore RPC OK — la base respondió (lectura mínima en computadoras)")
+    except Exception as e:
+        log_debug(
+            f"Firestore RPC FALLÓ — {type(e).__name__}: {e} "
+            "(revisá firewall/proxy, API Cloud Firestore habilitada y JSON del proyecto correcto)"
+        )
+
+
 # Inicialización única
 if not firebase_admin._apps:
     try:
-        _verificar_y_reparar_conectividad()
+        # ── Detección de modo emulador ──────────────────────────────────────
+        # El Admin SDK usa FIRESTORE_EMULATOR_HOST automáticamente para
+        # redirigir todas las llamadas al emulador local (no toca producción).
+        # Cuando esa variable está presente, saltamos los chequeos de red real.
+        _emulator_host = os.environ.get("FIRESTORE_EMULATOR_HOST", "").strip()
+        _usando_emulador = bool(_emulator_host)
+
+        if _usando_emulador:
+            log_debug(
+                f"⚠️  MODO EMULADOR ACTIVO — Firestore apunta a {_emulator_host}. "
+                "La base de datos de producción NO será afectada."
+            )
+        else:
+            _verificar_y_reparar_conectividad()
+
         if not os.path.exists(FIREBASE_JSON_PATH):
             log_debug(f"ERROR: No existe el JSON en {FIREBASE_JSON_PATH}")
         cred = credentials.Certificate(FIREBASE_JSON_PATH)
         firebase_admin.initialize_app(cred)
-        log_debug("Conexión establecida con Firebase")
-        # log_centralizado se llama después de que db exista (más abajo)
+
+        if _usando_emulador:
+            log_debug(f"Firebase Admin SDK inicializado → EMULADOR ({_emulator_host})")
+        else:
+            log_debug(
+                "Firebase Admin inicializado (credenciales cargadas; la conexión real a Firestore se prueba justo después)"
+            )
     except Exception as e:
         log_debug(f"Fallo crítico de conexión: {str(e)}")
         sys.exit(1)
 
 db = firestore.client()
 
+_emulator_host_init = os.environ.get("FIRESTORE_EMULATOR_HOST", "").strip()
+if not _emulator_host_init:
+    _probar_rpc_firestore()
 
 def fallo_actualizacion_agente_remota(uuid_pc, hostname, evento, detalle, contexto=None):
     """
@@ -486,6 +570,56 @@ _contadores = {
 }
 
 _hashes_memoria = {}
+
+def _error_es_documento_inexistente(err):
+    """True si Firestore rechazó update porque no existe el documento (p. ej. borrado en consola o falló el primer set)."""
+    if isinstance(err, google_api_exceptions.NotFound):
+        return True
+    try:
+        import grpc
+        if isinstance(err, grpc.RpcError) and err.code() == grpc.StatusCode.NOT_FOUND:
+            return True
+    except (ImportError, AttributeError):
+        pass
+    msg = str(err).lower()
+    return "no document to update" in msg or (
+        "404" in msg and "document" in msg
+    )
+
+
+def _es_error_transitorio(err):
+    """True si es un error de red/Firebase transitorio (503, 504, red no disponible)."""
+    if isinstance(err, (google_api_exceptions.ServiceUnavailable,
+                        google_api_exceptions.DeadlineExceeded)):
+        return True
+    try:
+        import grpc
+        if isinstance(err, grpc.RpcError):
+            return err.code() in (grpc.StatusCode.UNAVAILABLE, grpc.StatusCode.DEADLINE_EXCEEDED)
+    except (ImportError, AttributeError):
+        pass
+    msg = str(err).lower()
+    return (
+        "503" in msg or "504" in msg
+        or "unavailable" in msg
+        or "deadline exceeded" in msg
+        or "network is unreachable" in msg
+        or "wsagetoverlappedresult" in msg
+    )
+
+
+def _ejecutar_con_reintento(fn, max_intentos=3, esperas=(5, 15, 30)):
+    """Ejecuta fn() reintentando ante errores transitorios de red/Firebase."""
+    for intento in range(max_intentos):
+        try:
+            return fn()
+        except Exception as e:
+            if not _es_error_transitorio(e) or intento == max_intentos - 1:
+                raise
+            espera = esperas[min(intento, len(esperas) - 1)]
+            log_debug(f"Error transitorio (intento {intento + 1}/{max_intentos}), reintentando en {espera}s: {e}")
+            time.sleep(espera)
+
 
 def _obtener_hash(dato):
     """Calcula un hash MD5 de un diccionario/lista para detectar cambios y evitar escrituras innecesarias."""
@@ -569,18 +703,22 @@ def enviar_datos_pc(datos, forzar_completo=False):
         if not document_id:
             return
         
-        _contadores['sincronizaciones_totales'] += 1
         tiempo_actual = time.time()
 
         # programas_instalados va a subcolección, nunca al doc principal
         programas = datos.pop("programas_instalados", None)
 
         # Primera sincronización o forzada → COMPLETA
-        if _contadores['sincronizaciones_totales'] == 1 or forzar_completo:
+        # El contador se incrementa DESPUÉS del set() exitoso; si falla, la próxima
+        # llamada también usará set() en lugar de update(), evitando 404.
+        if _contadores['sincronizaciones_totales'] == 0 or forzar_completo:
             datos["ultima_sincronizacion"] = firestore.SERVER_TIMESTAMP
             datos["version_agente"] = VERSION_AGENTE or "?"
             datos["estado_conexion"] = "ONLINE"
-            db.collection(FIREBASE_COLLECTION_NAME).document(document_id).set(datos, merge=True)
+            _ejecutar_con_reintento(
+                lambda: db.collection(FIREBASE_COLLECTION_NAME).document(document_id).set(datos, merge=True)
+            )
+            _contadores['sincronizaciones_totales'] += 1
             _contadores['ultima_sync_completa'] = tiempo_actual
             _contadores['ultima_sync_apps'] = tiempo_actual
             _contadores['ultima_sync_errores'] = tiempo_actual
@@ -601,6 +739,7 @@ def enviar_datos_pc(datos, forzar_completo=False):
             return
 
         # Sincronizaciones posteriores → INCREMENTALES
+        _contadores['sincronizaciones_totales'] += 1
         actualizacion = {
             "cpu_uso_porcentaje": datos.get("cpu_uso_porcentaje"),
             "ram_uso_porcentaje": datos.get("ram_uso_porcentaje"),
@@ -644,8 +783,28 @@ def enviar_datos_pc(datos, forzar_completo=False):
                 _contadores['ultima_sync_software'] = tiempo_actual
                 log_debug("Actualizando software critico")
 
-        db.collection(FIREBASE_COLLECTION_NAME).document(document_id).update(actualizacion)
-        log_debug(f"Sincronización incremental: {document_id}")
+        doc_ref = db.collection(FIREBASE_COLLECTION_NAME).document(document_id)
+        try:
+            _ejecutar_con_reintento(lambda: doc_ref.update(actualizacion))
+            log_debug(f"Sincronización incremental: {document_id}")
+        except Exception as upd_err:
+            if not _error_es_documento_inexistente(upd_err):
+                raise
+            log_debug(
+                f"update sin documento ({document_id}), recuperando con set(merge=True)"
+            )
+            recuperacion = dict(datos)
+            recuperacion.update(actualizacion)
+            recuperacion["ultima_sincronizacion"] = firestore.SERVER_TIMESTAMP
+            recuperacion["version_agente"] = VERSION_AGENTE or "?"
+            recuperacion["estado_conexion"] = "ONLINE"
+            if programas is not None:
+                recuperacion["programas_instalados"] = programas
+            _ejecutar_con_reintento(lambda: doc_ref.set(recuperacion, merge=True))
+            if programas is not None:
+                sincronizar_programas_instalados(document_id, programas)
+                _contadores["ultima_sync_programas"] = tiempo_actual
+            log_debug(f"Sincronización recuperada (set merge): {document_id}")
 
         # Programas instalados cada 60 min → subcolección computadoras/{uuid}/programas
         if (
@@ -722,6 +881,7 @@ def escuchar_comandos_remotos(uuid_pc, evento_actualizar=None):
             tareas_ref.update({"comando": "PROCESANDO..."})
             try:
                 nuevos_datos = obtener_datos_pc(incluir_pesados=True)
+                nuevos_datos["uuid"] = uuid_pc
                 enviar_datos_pc(nuevos_datos, forzar_completo=True)
                 tareas_ref.update({
                     "comando": "PROCESADO",
@@ -777,6 +937,7 @@ def escuchar_comandos_remotos(uuid_pc, evento_actualizar=None):
                     hostname=hn,
                 )
                 nuevos_datos = obtener_datos_pc(incluir_pesados=True)
+                nuevos_datos["uuid"] = uuid_pc
                 enviar_datos_pc(nuevos_datos, forzar_completo=True)
             except Exception as e:
                 log_debug(f"Error instalando updates: {e}")
@@ -797,6 +958,40 @@ def escuchar_comandos_remotos(uuid_pc, evento_actualizar=None):
             log_debug("Comando recibido: ACTUALIZAR_AGENTE")
             log_centralizado("Info", "Comando", f"Comando recibido: ACTUALIZAR_AGENTE (host {hn})")
             frozen = getattr(sys, "frozen", False)
+
+            # --- Anti-replay: descartar comandos con más de N segundos de antigüedad ---
+            try:
+                from datetime import datetime, timezone
+                try:
+                    from config.config import UPDATE_COMMAND_MAX_AGE_SECONDS
+                except Exception:
+                    UPDATE_COMMAND_MAX_AGE_SECONDS = 600
+                fecha_cmd = data.get("fecha_comando")
+                if fecha_cmd is not None:
+                    # Firestore Timestamps tienen .replace(tzinfo=...) disponible
+                    if hasattr(fecha_cmd, 'replace'):
+                        ts_utc = fecha_cmd.replace(tzinfo=timezone.utc) if fecha_cmd.tzinfo is None else fecha_cmd.astimezone(timezone.utc)
+                    else:
+                        ts_utc = None
+                    if ts_utc is not None:
+                        edad_seg = (datetime.now(timezone.utc) - ts_utc).total_seconds()
+                        if edad_seg > UPDATE_COMMAND_MAX_AGE_SECONDS:
+                            log_debug(
+                                f"ACTUALIZAR_AGENTE descartado: comando con antigüedad "
+                                f"{edad_seg:.0f}s > {UPDATE_COMMAND_MAX_AGE_SECONDS}s (anti-replay). "
+                                f"Envía un nuevo comando desde el dashboard."
+                            )
+                            registrar_log_actualizacion(
+                                "ACTUALIZAR_AGENTE_REPLAY_DESCARTADO",
+                                f"Comando descartado por anti-replay: antigüedad {edad_seg:.0f}s > {UPDATE_COMMAND_MAX_AGE_SECONDS}s.",
+                                uuid=uuid_pc,
+                                hostname=hn,
+                                extra={"edad_segundos": round(edad_seg), "max_permitido": UPDATE_COMMAND_MAX_AGE_SECONDS},
+                            )
+                            return
+            except Exception as e_replay:
+                log_debug(f"Anti-replay check error (no bloqueante): {e_replay}")
+            # -------------------------------------------------------------------------
             registrar_log_actualizacion(
                 "ACTUALIZAR_AGENTE_RECIBIDO",
                 f"Listener Firestore: comando ACTUALIZAR_AGENTE para tareas/{uuid_pc} (host {hn}).",

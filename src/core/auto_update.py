@@ -6,8 +6,14 @@ No busca actualizaciones solo. Tú disparas la actualización:
   2. En tareas/{uuid}: comando = "ACTUALIZAR_AGENTE".
 
 El agente descarga ese .exe, se reemplaza y reinicia el servicio.
+
+SEGURIDAD:
+  - La URL de descarga debe usar HTTPS y estar en la whitelist de dominios (config.UPDATE_ALLOWED_DOMAINS).
+  - El campo sha256 en Firestore es OBLIGATORIO; si falta, la actualización se rechaza antes de descargar.
+  - El campo firma (ECDSA P-256) en Firestore es OBLIGATORIO; si falta o es inválida, el binario se borra.
 """
 import hashlib
+import ipaddress
 import os
 import subprocess
 import sys
@@ -16,6 +22,68 @@ from urllib.parse import urlparse
 
 SERVICIO_NOMBRE = "AgenteMonitoreo"
 _MIN_BYTES_EXE = 100000
+
+
+def _validar_url_segura(url: str) -> str | None:
+    """
+    Valida que la URL sea segura antes de intentar cualquier descarga.
+    Retorna None si es válida, o un string con el motivo del rechazo.
+
+    Controles:
+      1. Esquema debe ser 'https' (no http, ftp, file, etc.).
+      2. El host no puede ser una IP privada, loopback ni link-local.
+      3. El host debe pertenecer a la whitelist UPDATE_ALLOWED_DOMAINS.
+    """
+    try:
+        from config.config import UPDATE_ALLOWED_DOMAINS
+    except Exception:
+        UPDATE_ALLOWED_DOMAINS = [
+            "objects.githubusercontent.com",
+            "github.com",
+            "releases.githubusercontent.com",
+            "api.github.com",
+        ]
+
+    if not url or not url.strip():
+        return "URL vacía."
+
+    p = urlparse(url.strip())
+
+    # 1. Solo HTTPS
+    if p.scheme != "https":
+        return (
+            f"Esquema no permitido: '{p.scheme}'. "
+            "Solo se acepta 'https'. Posible intento de intercepción o URL maliciosa."
+        )
+
+    host = (p.hostname or "").lower()
+    if not host:
+        return "URL sin host válido."
+
+    # 2. Bloquear IPs privadas / loopback / link-local
+    try:
+        addr = ipaddress.ip_address(host)
+        if addr.is_private or addr.is_loopback or addr.is_link_local or addr.is_multicast:
+            return (
+                f"IP no pública no permitida: '{host}'. "
+                "Las actualizaciones solo pueden descargarse desde hosts públicos."
+            )
+    except ValueError:
+        pass  # Es un nombre de dominio, no una IP — continuar
+
+    # 3. Whitelist de dominios
+    dominios_permitidos = [d.lower() for d in UPDATE_ALLOWED_DOMAINS]
+    if not any(
+        host == dominio or host.endswith("." + dominio)
+        for dominio in dominios_permitidos
+    ):
+        return (
+            f"Dominio '{host}' no está en la whitelist de dominios permitidos: "
+            f"{dominios_permitidos}. "
+            "Actualizá UPDATE_ALLOWED_DOMAINS en config/config.py si el dominio es legítimo."
+        )
+
+    return None  # URL válida
 
 
 # CLAVE PÚBLICA PARA VERIFICAR FIRMAS DIGITALES (Reemplazar con la generada por el script)
@@ -89,6 +157,46 @@ def download_and_apply_update(url, uuid=None, hostname=None, sha256_esperado=Non
                 registrar_log_actualizacion(evento, detalle, uuid=uuid, hostname=hostname, extra=base)
             except Exception:
                 pass
+
+    # -----------------------------------------------------------------------
+    # BLOQUE DE SEGURIDAD — todas las validaciones ANTES de tocar la red
+    # -----------------------------------------------------------------------
+
+    # 1. Validar URL (esquema, dominio, no IPs privadas)
+    error_url = _validar_url_segura(url or "")
+    if error_url:
+        _fail(
+            "SEGURIDAD_URL_INVALIDA",
+            f"URL rechazada por política de seguridad: {error_url}",
+            {"url_rechazada": (url or "")[:200], "motivo": error_url},
+        )
+        return False
+
+    # 2. SHA-256 obligatorio — sin él no se puede verificar integridad
+    if not sha256_esperado or not sha256_esperado.strip():
+        _fail(
+            "SEGURIDAD_SHA256_REQUERIDO",
+            "El campo 'sha256' no está presente en config/agente_hw de Firestore. "
+            "La actualización fue rechazada por política de seguridad. "
+            "Usá scripts/firmar_release.py para generar SHA-256 y firma antes de publicar.",
+            {"url": (url or "")[:200]},
+        )
+        return False
+
+    # 3. Firma ECDSA obligatoria — sin ella no se puede verificar autenticidad
+    if not firma_esperada or not firma_esperada.strip():
+        _fail(
+            "SEGURIDAD_FIRMA_REQUERIDA",
+            "El campo 'firma' (ECDSA P-256) no está presente en config/agente_hw de Firestore. "
+            "La actualización fue rechazada por política de seguridad. "
+            "Usá scripts/firmar_release.py para generar SHA-256 y firma antes de publicar.",
+            {"url": (url or "")[:200], "sha256_recibido": (sha256_esperado or "")[:20] + "..."},
+        )
+        return False
+
+    # -----------------------------------------------------------------------
+    # Fin bloque de seguridad — proceder con la descarga
+    # -----------------------------------------------------------------------
 
     try:
         from src.database.firebase_client import log_centralizado

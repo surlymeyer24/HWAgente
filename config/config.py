@@ -15,3 +15,23 @@ FIREBASE_JSON_PATH = os.path.join(BASE_DIR, "auth", "serviceAccountKey.json")
 FIREBASE_COLLECTION_NAME = "computadoras"
 VERSION = "5.4.0"
 DEBUG_MODE = False
+
+# ---------------------------------------------------------------------------
+# SEGURIDAD — Módulo de actualización remota
+# ---------------------------------------------------------------------------
+
+# Dominios HTTPS desde los cuales se permite descargar actualizaciones del agente.
+# Solo se aceptará una URL cuyo host sea exactamente uno de estos dominios
+# o un subdominio de ellos. Cualquier otra URL será rechazada antes de la descarga.
+# Para GitHub Releases los binarios se sirven desde objects.githubusercontent.com.
+UPDATE_ALLOWED_DOMAINS: list[str] = [
+    "objects.githubusercontent.com",
+    "github.com",
+    "releases.githubusercontent.com",
+    "api.github.com",
+]
+
+# Antigüedad máxima (en segundos) que se acepta para un comando ACTUALIZAR_AGENTE.
+# Comandos más viejos que este valor son descartados para prevenir ataques de replay.
+# Por defecto: 10 minutos.
+UPDATE_COMMAND_MAX_AGE_SECONDS: int = 600

@@ -1,0 +1,75 @@
+rules_version = '2';
+// ============================================================================
+// Firestore Security Rules — AgenteBacar
+// ============================================================================
+// IMPORTANTE: El Admin SDK (Service Account del agente y del backend) ignora
+// estas reglas y siempre tiene acceso completo. Estas reglas solo afectan a
+// clientes que usen Firebase Auth (el dashboard web, apps móvil, etc.).
+//
+// Para deployar:
+//   firebase deploy --only firestore:rules
+// ============================================================================
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // -------------------------------------------------------------------------
+    // config/ — COMPLETAMENTE CERRADO al SDK cliente
+    // -------------------------------------------------------------------------
+    // Contiene config/agente_hw y config/agente con la URL de actualización.
+    // Solo el Admin SDK (agente + backend) puede leer o escribir aquí.
+    // Esto previene que cualquier usuario del dashboard (o atacante con token
+    // válido) inyecte una URL maliciosa que desencadene una actualización falsa.
+    match /config/{document} {
+      allow read, write: if false;
+    }
+
+    // -------------------------------------------------------------------------
+    // computadoras/ — lectura para dashboard, escritura solo Admin SDK
+    // -------------------------------------------------------------------------
+    // El agente escribe datos de hardware via Admin SDK (no afectado por reglas).
+    // El dashboard puede leer para mostrar el estado de las PCs.
+    // Ningún cliente puede escribir directamente datos de una máquina.
+    match /computadoras/{machineId} {
+      allow read: if request.auth != null;
+      allow write: if false;
+
+      // Subcolección programas: mismos permisos que el documento padre.
+      match /programas/{programaId} {
+        allow read: if request.auth != null;
+        allow write: if false;
+      }
+    }
+
+    // -------------------------------------------------------------------------
+    // tareas/ — el dashboard autenticado puede escribir comandos
+    // -------------------------------------------------------------------------
+    // El dashboard escribe comandos (ACTUALIZAR_AGENTE, ACTUALIZAR_DATOS, etc.).
+    // El agente lee y actualiza el estado via Admin SDK.
+    // Los clientes NO pueden leer tareas (contiene metadata interna de la PC).
+    //
+    // NOTA IMPORTANTE para el anti-replay:
+    // El dashboard DEBE incluir el campo "fecha_comando: SERVER_TIMESTAMP"
+    // al escribir ACTUALIZAR_AGENTE. El agente rechaza comandos con más de
+    // 10 minutos de antigüedad (configurable en config/config.py).
+    match /tareas/{machineId} {
+      allow read: if false;
+      allow write: if request.auth != null;
+    }
+
+    // -------------------------------------------------------------------------
+    // logs_actualizaciones/ — lectura para dashboard, escritura solo Admin SDK
+    // -------------------------------------------------------------------------
+    match /logs_actualizaciones/{logId} {
+      allow read: if request.auth != null;
+      allow write: if false;
+    }
+
+    // -------------------------------------------------------------------------
+    // cyberwatch_logs/ — lectura para dashboard, escritura solo Admin SDK
+    // -------------------------------------------------------------------------
+    match /cyberwatch_logs/{logId} {
+      allow read: if request.auth != null;
+      allow write: if false;
+    }
+  }
+}

@@ -2,10 +2,11 @@ import time
 import sys
 import subprocess
 import os
+import threading
 
 # --- 1. PREVENCIÓN DE ERRORES EN MODO INVISIBLE ---
-# Se define antes que nada para evitar crasheos por falta de consola 
 from config.config import DEBUG_MODE
+
 if getattr(sys, 'frozen', False) and not DEBUG_MODE:
     sys.stdin = None
     sys.stdout = open(os.devnull, 'w', encoding='utf-8')
@@ -205,16 +206,51 @@ if RUNNING_AS_SERVICE:
                                 except Exception:
                                     pass
                                 continue
-                            if download_and_apply_update(
-                                url,
-                                uuid=datos.get("uuid"),
-                                hostname=datos.get("hostname"),
-                                sha256_esperado=sha256,
-                                firma_esperada=firma
-                            ):
-                                log_debug("Actualizacion programada; reinicio en breve.")
-                                self.running = False
-                                break
+                            if getattr(self, "_hilo_descarga", None) and self._hilo_descarga.is_alive():
+                                try:
+                                    log_debug("ACTUALIZAR_AGENTE: descarga ya en curso, se descarta solicitud duplicada.")
+                                except Exception:
+                                    pass
+                                continue
+                            _uuid = datos.get("uuid")
+                            _hostname = datos.get("hostname")
+                            _url, _sha256, _firma = url, sha256, firma
+
+                            def _hilo_descarga_fn():
+                                try:
+                                    from src.database.firebase_client import log_debug
+                                    exito = download_and_apply_update(
+                                        _url,
+                                        uuid=_uuid,
+                                        hostname=_hostname,
+                                        sha256_esperado=_sha256,
+                                        firma_esperada=_firma,
+                                    )
+                                    if exito:
+                                        log_debug("Actualizacion programada; reinicio en breve.")
+                                        self.running = False
+                                        win32event.SetEvent(self.hWaitStop)
+                                except Exception as e:
+                                    try:
+                                        from src.database.firebase_client import (
+                                            fallo_actualizacion_agente_remota,
+                                            log_debug,
+                                        )
+                                        log_debug(f"Error actualizando agente: {e}")
+                                        fallo_actualizacion_agente_remota(
+                                            _uuid,
+                                            _hostname,
+                                            "EXCEPCION_HILO_ACTUALIZACION",
+                                            str(e),
+                                            {"tipo_excepcion": type(e).__name__},
+                                        )
+                                    except Exception:
+                                        pass
+
+                            self._hilo_descarga = threading.Thread(
+                                target=_hilo_descarga_fn, daemon=True, name="AgentUpdate"
+                            )
+                            self._hilo_descarga.start()
                         except Exception as e:
                             try:
                                 from src.database.firebase_client import (
@@ -232,7 +268,9 @@ if RUNNING_AS_SERVICE:
                             except Exception:
                                 pass
                         continue
-                    enviar_datos_pc(obtener_datos_pc())
+                    datos_ciclo = obtener_datos_pc()
+                    datos_ciclo["uuid"] = uuid_final
+                    enviar_datos_pc(datos_ciclo)
                     
             except Exception as e:
                 log_arranque(f"SVCRUN_ERROR — {type(e).__name__}: {e}")
@@ -261,6 +299,36 @@ if __name__ == "__main__":
             sys.exit(0)
         except:
             pass  # Si falla, continúa al Caso C
+
+    if "--dev" in sys.argv:
+        emulator = os.getenv("FIRESTORE_EMULATOR_HOST")
+        log_arranque(f"DEV_MODE — FIRESTORE_EMULATOR_HOST: {emulator or '(no seteado — usará BD real)'}")
+        print("FIRESTORE_EMULATOR_HOST:", emulator)
+        print("Importando firebase_client...")
+        from src.database.firebase_client import (
+            enviar_datos_pc, escuchar_comandos_remotos,
+            resolver_machine_id, set_machine_uuid
+        )
+        print("Importando scanner...")
+        from src.core.scanner import obtener_datos_pc
+        print("Obteniendo datos PC...")
+        datos = obtener_datos_pc()
+        print("Resolviendo machine ID...")
+        uuid_final = resolver_machine_id(datos.get("uuid", ""), datos.get("hostname", ""))
+        datos["uuid"] = uuid_final
+        set_machine_uuid(uuid_final)
+        print("Enviando datos...")
+        enviar_datos_pc(datos)
+        log_arranque("DEV_MODE — datos enviados OK")
+        print("Listo. Cerrá esta ventana o presioná Enter para salir...")
+        try:
+            input()
+        except (RuntimeError, EOFError):
+            # exe sin consola (console=False en spec) — mantener proceso activo
+            log_arranque("DEV_MODE — sin stdin, esperando señal de cierre (Ctrl+C o cerrar proceso)")
+            import signal
+            signal.pause() if hasattr(signal, "pause") else time.sleep(3600)
+        sys.exit(0)
 
     # Caso C: Usuario ejecuta el .exe con doble clic
     if not servicio_esta_instalado():

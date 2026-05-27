@@ -98,6 +98,45 @@ Los comandos se envían desde el frontend escribiendo en el documento `tareas/{u
 
 **Importante:** `verificar_version.bat` **no está en el PATH** y **no va en las PCs cliente**; solo en la máquina donde desarrollás o administrás. Si ejecutás desde otra carpeta (por ejemplo `C:\Windows\Temp`), PowerShell no lo encuentra.
 
+---
+
+## Desarrollo y Pruebas Locales
+
+### Emulador de Firebase Firestore
+
+Para pruebas locales sin afectar la base de datos de producción:
+
+1. **Instalar Firebase CLI** (si no lo tenés):
+   ```
+   npm install -g firebase-tools
+   ```
+
+2. **Inicializar emuladores** (en la raíz del proyecto):
+   ```
+   firebase init emulators
+   ```
+   Seleccionar Firestore Emulator.
+
+3. **Iniciar emulador**:
+   ```
+   firebase emulators:start --only firestore
+   ```
+   El emulador corre en `http://localhost:8080`, UI en `http://localhost:4000`.
+
+4. **Configurar para desarrollo**:
+   - En `config/config.py`, setear `USE_FIREBASE_EMULATOR = True` y `DEBUG_MODE = True`.
+   - El archivo `.env.development` ya tiene `FIRESTORE_EMULATOR_HOST=127.0.0.1:8080`.
+
+5. **Ejecutar agente**:
+   ```
+   python main.py
+   ```
+   Verificar en la UI del emulador que los datos se suban a la colección `computadoras`.
+
+6. **Para producción**: Cambiar `USE_FIREBASE_EMULATOR = False` y `DEBUG_MODE = False` en `config/config.py`.
+
+**Nota:** El emulador usa datos locales y no persiste entre reinicios. Para producción, usa la BD real de Firebase.
+
 ```powershell
 Set-Location C:\Users\Usr\Documents\MiniAgente
 .\verificar_version.bat
@@ -123,8 +162,10 @@ El script **une** `computadoras` y `tareas` por UUID. Si **`version_agente`** co
 
 - **Primera sync**: envío completo con `.set()`
 - **Syncs posteriores**: actualizaciones incrementales con `.update()`. Utiliza un **sistema de hashing en memoria** (MD5) para comparar datos pesados antes de enviar, evitando escrituras innecesarias en Firestore y ahorrando costos.
+- **ID del documento (`computadoras/{id}`)** — Es el resultado de **`resolver_machine_id`**: normalmente el UUID de placa (WMI); si hay colisión con otro equipo en Firestore, un ID alternativo (`hostname_…`). Ese mismo ID se reutiliza en **todos** los ciclos del servicio y en comandos remotos (`ACTUALIZAR_DATOS`, etc.), no el UUID crudo aislado del escaneo.
+- **Recuperación ante 404** — Si un `.update()` falla porque el documento no existe (p. ej. borrado en consola o falló el primer `.set()` por red), el agente hace **`.set(..., merge=True)`** para volver a crear el doc sin quedar en error permanente.
 - **Colecciones usadas**:
-  - `computadoras` — datos de cada PC (ID = UUID del motherboard)
+  - `computadoras` — datos de cada PC (ID = UUID de placa o ID alternativo si hubo colisión; ver `resolver_machine_id` en `firebase_client.py`)
   - `computadoras/{uuid}/programas` — subcolección con un doc por programa instalado (ID = slug del nombre + hash corto). Campos: `nombre`, `version`, `publisher`, `fecha_instalacion` (YYYY-MM-DD), `arquitectura` (`x64` / `x86` / `user`), `ultima_vez_visto`. Se refresca cada 60 min; los programas desinstalados se borran en el siguiente sync.
   - `tareas` — comandos remotos por UUID
   - `config/agente_hw` — URL del `.exe` para **ACTUALIZAR_AGENTE** (opcionalmente `version` informativa y `sha256` para seguridad).
