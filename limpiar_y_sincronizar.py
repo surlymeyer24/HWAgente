@@ -1,21 +1,17 @@
 #!/usr/bin/env python3
-"""
-Limpia entradas fantasma de Firestore y fuerza sync completa en PCs activas.
-
-1. Envía ACTUALIZAR_DATOS a las PCs activas (fuerza sync completa).
-2. Borra los documentos fantasma (sin version_agente) de 'computadoras' y 'tareas'.
-
-La colección 'config' no se toca.
-
-Uso: python limpiar_y_sincronizar.py
-"""
-import os
-import sys
+import os, sys
+from datetime import datetime
 
 RAIZ = os.path.dirname(os.path.abspath(__file__))
 os.chdir(RAIZ)
 if RAIZ not in sys.path:
     sys.path.insert(0, RAIZ)
+
+def parse_iso(iso_str):
+    try:
+        return datetime.fromisoformat(iso_str.replace("Z", "+00:00"))
+    except:
+        return datetime.min
 
 def main():
     try:
@@ -25,23 +21,41 @@ def main():
         print("Error importando Firebase:", e)
         return 1
 
-    # --- 1. Clasificar documentos ---
-    activos = {}
+    por_hostname = {}
     fantasmas = set()
 
+    # 1. Agrupar por hostname y encontrar el mas reciente
     for doc in db.collection(FIREBASE_COLLECTION_NAME).stream():
         d = doc.to_dict() or {}
         version = d.get("version_agente")
-        if not version or version == "-":
+        hostname = (d.get("hostname") or "").strip()
+        
+        # Ignorar si no tiene version o no tiene hostname
+        if not version or version == "-" or not hostname:
             fantasmas.add(doc.id)
-        else:
-            activos[doc.id] = d.get("hostname", "?")
+            continue
 
+        ts_str = str(d.get("ultima_sincronizacion") or "")
+        ts = parse_iso(ts_str)
+        
+        if hostname not in por_hostname:
+            por_hostname[hostname] = (doc.id, ts)
+        else:
+            # Si ya existe, nos quedamos con el mas reciente
+            id_actual, ts_actual = por_hostname[hostname]
+            if ts > ts_actual:
+                fantasmas.add(id_actual)
+                por_hostname[hostname] = (doc.id, ts)
+            else:
+                fantasmas.add(doc.id)
+
+    activos = {id_doc: hostname for hostname, (id_doc, _) in por_hostname.items()}
+
+    # 2. Agregar los que estan en tareas pero no en activos a fantasmas
     for doc in db.collection("tareas").stream():
         if doc.id not in activos:
             fantasmas.add(doc.id)
 
-    # --- 2. Forzar sync completa en PCs activas ---
     print(f"Enviando ACTUALIZAR_DATOS a {len(activos)} PC(s) activas:")
     for uuid, hostname in activos.items():
         try:
@@ -53,8 +67,7 @@ def main():
         except Exception as e:
             print(f"  Error {hostname}: {e}")
 
-    # --- 3. Borrar fantasmas ---
-    print(f"\nBorrando {len(fantasmas)} entradas fantasma:")
+    print(f"\nBorrando {len(fantasmas)} entradas fantasma (duplicados o inactivos):")
     for uuid in fantasmas:
         try:
             db.collection(FIREBASE_COLLECTION_NAME).document(uuid).delete()
@@ -63,7 +76,7 @@ def main():
         except Exception as e:
             print(f"  Error borrando {uuid}: {e}")
 
-    print("\nListo. Las PCs activas van a enviar todos sus datos en los próximos segundos.")
+    print("\nListo. PCs limpias y sin duplicados.")
     return 0
 
 if __name__ == "__main__":

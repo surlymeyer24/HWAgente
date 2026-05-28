@@ -41,6 +41,7 @@ def _leer_url_y_meta_actualizacion_agente():
     origen = None
     sha256_esperado = None
     firma_esperada = None
+
     if cfg_hw:
         d = doc_hw.to_dict() or {}
         url = (d.get("url") or "").strip()
@@ -572,15 +573,25 @@ _contadores = {
 _hashes_memoria = {}
 
 def _error_es_documento_inexistente(err):
-    """True si Firestore rechazó update porque no existe el documento (p. ej. borrado en consola o falló el primer set)."""
-    if isinstance(err, google_api_exceptions.NotFound):
-        return True
+    """True si Firestore rechazó update porque no existe el documento."""
+    try:
+        if isinstance(err, google_api_exceptions.NotFound):
+            return True
+    except Exception:
+        pass
+
     try:
         import grpc
-        if isinstance(err, grpc.RpcError) and err.code() == grpc.StatusCode.NOT_FOUND:
-            return True
-    except (ImportError, AttributeError):
+        if isinstance(err, grpc.RpcError):
+            if err.code() == grpc.StatusCode.NOT_FOUND:
+                return True
+            if hasattr(err, "details") and err.details():
+                det = str(err.details()).lower()
+                if "no document to update" in det or ("404" in det and "document" in det):
+                    return True
+    except Exception:
         pass
+
     msg = str(err).lower()
     return "no document to update" in msg or (
         "404" in msg and "document" in msg

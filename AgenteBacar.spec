@@ -80,9 +80,23 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
+    excludes=[
+        # GUI — no usada en un servicio Windows
+        'tkinter', '_tkinter', 'tkinter.ttk', 'tkinter.messagebox',
+        'turtle', 'curses',
+        # Testing / desarrollo — no van al exe de producción
+        'unittest', 'doctest', 'pydoc', 'lib2to3', 'test',
+        # Clientes de correo / FTP / red que no se usan
+        'ftplib', 'imaplib', 'poplib', 'smtplib', 'telnetlib',
+        'nntplib', 'xmlrpc', 'mailbox',
+        # Base de datos local — Firebase usa Firestore, no SQLite
+        'sqlite3', '_sqlite3',
+        # Misceláneos seguros de excluir
+        'msilib', 'antigravity', 'py_compile',
+        'setuptools', 'pkg_resources',
+    ],
     noarchive=False,
-    optimize=0,
+    optimize=1,
 )
 pyz = PYZ(a.pure)
 
@@ -100,7 +114,7 @@ exe = EXE(
     upx=False,
     upx_exclude=[],
     runtime_tmpdir=None,
-    console=True,  # TEMPORAL — revertir a False antes del release
+    console=False,
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
