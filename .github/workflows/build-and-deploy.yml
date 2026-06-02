@@ -7,6 +7,9 @@
 #     O en PowerShell:
 #       [Convert]::ToBase64String([IO.File]::ReadAllBytes('auth\serviceAccountKey.json'))
 #
+#   CLAVE_PRIVADA_PEM
+#     Contenido completo de clave_privada.pem (incluir cabecera y pie BEGIN/END EC PRIVATE KEY).
+#
 # ADVERTENCIA DE SEGURIDAD:
 #   Las credenciales Firebase quedan embebidas en el .exe via PyInstaller.
 #   Asegúrate de que la cuenta de servicio tenga permisos mínimos (solo escritura en Firestore).
@@ -133,6 +136,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+  # Job independiente en Ubuntu: descarga el exe publicado, lo firma con ECDSA y actualiza Firestore.
   update-firestore:
     if: ${{ github.event.inputs.actualizar_firestore == 'si' }}
     runs-on: ubuntu-latest
@@ -160,18 +164,22 @@ jobs:
           sa = json.loads(base64.b64decode(s).decode("utf-8"))
 
           # --- Clave privada ECDSA ---
+          # GitHub a veces pasa secrets multilínea con \n escapados — normalizamos.
           pem = os.environ.get("CLAVE_PRIVADA_PEM", "").strip()
           if not pem:
-              raise SystemExit("ERROR: Secret CLAVE_PRIVADA_PEM no configurado. Agregalo en GitHub → Settings → Secrets.")
+              raise SystemExit("ERROR: Secret CLAVE_PRIVADA_PEM no configurado.")
+          if "\\n" in pem:
+              pem = pem.replace("\\n", "\n")
+          if not pem.endswith("\n"):
+              pem += "\n"
 
           version_tag = os.environ.get("VERSION", "").strip()
           version_plain = version_tag.lstrip("v") if version_tag else ""
           repo = os.environ.get("GITHUB_REPOSITORY", "")
           url = f"https://github.com/{repo}/releases/download/{version_tag}/AgenteBacar.exe"
 
-          # --- Descargar el exe desde el release ---
+          # --- Descargar el exe desde el release (con reintentos) ---
           print(f"Descargando {url} ...")
-          # Reintentos por si el release aun no propagó
           exe_data = None
           for intento in range(6):
               try:
@@ -190,8 +198,15 @@ jobs:
           sha256 = hashlib.sha256(exe_data).hexdigest()
           print(f"SHA-256: {sha256}")
 
-          # --- Firmar con ECDSA P-256 ---
-          sk = ecdsa_lib.SigningKey.from_pem(pem.encode("utf-8"))
+          # --- Firmar con ECDSA ---
+          try:
+              sk = ecdsa_lib.SigningKey.from_pem(pem.encode("utf-8"))
+          except Exception as e:
+              # Fallback: reconstruir el PEM línea por línea por si el formato llegó roto
+              print(f"from_pem directo fallo ({e}), reconstruyendo PEM...")
+              lines = [l for l in pem.splitlines() if l.strip()]
+              pem2 = "\n".join(lines) + "\n"
+              sk = ecdsa_lib.SigningKey.from_pem(pem2.encode("utf-8"))
           firma_bytes = sk.sign(exe_data, hashfunc=hashlib.sha256)
           firma_b64 = base64.b64encode(firma_bytes).decode("utf-8")
           print(f"Firma: {firma_b64[:40]}...")
@@ -208,5 +223,5 @@ jobs:
           }
           db.collection("config").document("agente_hw").set(data_hw, merge=True)
           db.collection("config").document("agente").set({"url": url}, merge=True)
-          print(f"Firestore config/agente_hw actualizado → version={version_plain}")
+          print(f"Firestore config/agente_hw actualizado -> version={version_plain}")
           PYEOF

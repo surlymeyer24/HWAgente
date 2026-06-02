@@ -21,7 +21,7 @@ Agente de monitoreo IT para Windows. Se instala como servicio del sistema, recop
 - Modelo de procesador y cantidad de núcleos físicos
 - RAM total (GB) y módulos físicos (fabricante, modelo, capacidad, velocidad MHz)
 - Modelos de discos físicos
-
+- **Tipo de equipo**: Detección basada en el tipo de chasis y presencia de batería (con corrección para Mini PCs que reportan erróneamente chasis de laptop).
 #### Datos dinámicos — cada 5 minutos
 | Dato | Detalle |
 |------|---------|

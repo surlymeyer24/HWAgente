@@ -788,7 +788,10 @@ def obtener_tipo_equipo() -> dict:
                 chassis_set = set()
 
             if chassis_set & _CHASSIS_NOTEBOOK:
-                tipo = 'notebook'
+                if not tiene_bateria:
+                    tipo = 'desktop'
+                else:
+                    tipo = 'notebook'
             elif chassis_set & _CHASSIS_TABLET:
                 tipo = 'tablet'
             elif chassis_set & _CHASSIS_ALLINONE:
