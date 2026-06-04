@@ -905,7 +905,7 @@ def escuchar_comandos_remotos(uuid_pc, evento_actualizar=None):
                     hostname=hn,
                 )
             except Exception as e:
-                log_debug(f"Error comando: {e}")
+                log_debug(f"[COMANDO ERROR] ACTUALIZAR_DATOS — {type(e).__name__}: {e}")
                 log_centralizado("Error", "Comando", f"Error en ACTUALIZAR_DATOS: {e}", e)
                 registrar_log_actualizacion(
                     "ERROR",
@@ -951,7 +951,7 @@ def escuchar_comandos_remotos(uuid_pc, evento_actualizar=None):
                 nuevos_datos["uuid"] = uuid_pc
                 enviar_datos_pc(nuevos_datos, forzar_completo=True)
             except Exception as e:
-                log_debug(f"Error instalando updates: {e}")
+                log_debug(f"[COMANDO ERROR] INSTALAR_UPDATES — {type(e).__name__}: {e}")
                 log_centralizado("Error", "Comando", f"Error en INSTALAR_UPDATES: {e}", e)
                 registrar_log_actualizacion(
                     "ERROR",
@@ -1101,7 +1101,7 @@ def escuchar_comandos_remotos(uuid_pc, evento_actualizar=None):
                         "fecha_comando_ejecutado": firestore.SERVER_TIMESTAMP
                     })
             except Exception as e:
-                log_debug(f"Error ACTUALIZAR_AGENTE: {e}")
+                log_debug(f"[COMANDO ERROR] ACTUALIZAR_AGENTE — {type(e).__name__}: {e}")
                 log_centralizado("Error", "Comando", f"Excepción en ACTUALIZAR_AGENTE: {e}", e)
                 registrar_log_actualizacion(
                     "ACTUALIZAR_AGENTE_EXCEPCION",
@@ -1169,12 +1169,38 @@ def escuchar_comandos_remotos(uuid_pc, evento_actualizar=None):
                     "fecha_comando_ejecutado": firestore.SERVER_TIMESTAMP
                 })
             except Exception as e:
-                log_debug(f"Error programando reinicio: {e}")
+                log_debug(f"[COMANDO ERROR] RESETEAR_ID — {type(e).__name__}: {e}")
+                registrar_log_actualizacion(
+                    "RESETEAR_ID_ERROR",
+                    f"Error al programar el bat de reinicio: {e}",
+                    uuid=uuid_pc,
+                    hostname=hn,
+                    extra={"tipo_excepcion": type(e).__name__},
+                )
                 tareas_ref.update({
                     "comando": "RESETEAR_ID_ERROR",
                     "resultado_updates": {"estado": "error", "mensaje": str(e)},
                     "fecha_comando_ejecutado": firestore.SERVER_TIMESTAMP
                 })
+
+        else:
+            # Ignorar estados que el propio agente escribe en tareas.comando
+            _estados_internos = {
+                "NINGUNO", "PROCESANDO...", "PROCESADO",
+                "INSTALANDO_UPDATES...", "UPDATES_PROCESADO", "UPDATES_ERROR",
+                "DESCARGANDO_AGENTE...", "ACTUALIZACION_PROGRAMADA",
+                "ACTUALIZAR_AGENTE_ERROR", "ACTUALIZAR_DATOS_ERROR",
+                "RESETEANDO_ID...", "RESET_PROGRAMADO", "RESETEAR_ID_ERROR",
+            }
+            if comando and comando not in _estados_internos:
+                log_debug(f"[COMANDO DESCONOCIDO] '{comando}' — ignorado (tareas/{uuid_pc})")
+                registrar_log_actualizacion(
+                    "COMANDO_DESCONOCIDO",
+                    f"Comando no reconocido recibido: '{comando}'",
+                    uuid=uuid_pc,
+                    hostname=hn,
+                    extra={"comando_recibido": comando},
+                )
 
     _tareas_snapshot_watch = tareas_ref.on_snapshot(on_snapshot)
 
