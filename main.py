@@ -23,13 +23,19 @@ except ImportError:
     RUNNING_AS_SERVICE = False
 
 # --- 3. FUNCIONES DE UTILIDAD ---
+_cola_logs_arranque = []  # Cola para logs de arranque; se sube a Firebase en batch una vez que esté listo
+
 def log_arranque(mensaje):
     """Escribe al archivo de debug sin depender de Firebase (disponible desde el primer instante)."""
+    ts = time.strftime("%Y-%m-%d %H:%M:%S")
     try:
         path = "C:\\agente_debug.txt"
-        ts = time.strftime("%Y-%m-%d %H:%M:%S")
         with open(path, "a", encoding="utf-8") as f:
             f.write(f"[{ts}] [ARRANQUE] {mensaje}\n")
+    except:
+        pass
+    try:
+        _cola_logs_arranque.append(f"[{ts}] [ARRANQUE] {mensaje}")
     except:
         pass
 
@@ -124,6 +130,7 @@ if RUNNING_AS_SERVICE:
                     resolver_machine_id,
                     set_machine_uuid,
                     VERSION_AGENTE,
+                    flush_logs_arranque,
                 )
                 from src.core.scanner import obtener_datos_pc
                 log_arranque("SVCRUN_FIREBASE_OK — módulos cargados")
@@ -147,6 +154,7 @@ if RUNNING_AS_SERVICE:
                     extra={"version": VERSION_AGENTE or "?", "pid": os.getpid()},
                 )
                 log_arranque(f"SVCRUN_SYNC_INICIAL — uuid: {uuid_final}")
+                flush_logs_arranque(uuid_final, datos.get("hostname", ""), _cola_logs_arranque)
                 enviar_datos_pc(datos)
                 # Evento para despertar el bucle cuando Firebase envíe ACTUALIZAR_AGENTE
                 try:

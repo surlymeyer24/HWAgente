@@ -8,6 +8,8 @@ import platform
 import sys
 import time
 from urllib.parse import urlparse
+import datetime
+import threading
 
 # Para ACTUALIZAR_AGENTE: el listener escribe aquí la información y despierta al bucle
 _info_actualizacion_pendiente_list = [{}]
@@ -108,12 +110,35 @@ def _obtener_hostname():
             pass
     return "PC-Desconocida"
 
+def _escribir_log_firestore_async(doc):
+    """Escribe un documento en logs_debug en un hilo daemon para no bloquear al llamador."""
+    try:
+        db.collection(_LOGS_DEBUG_COLLECTION).add(doc)
+    except Exception:
+        pass
+
+
 def log_debug(mensaje):
     try:
         path = "C:\\agente_debug.txt" if os.path.exists("C:\\") else "agente_debug.txt"
         with open(path, "a", encoding='utf-8') as f:
             f.write(f"{time.ctime()}: [Firebase] {mensaje}\n")
     except:
+        pass
+    try:
+        if 'db' in globals() and db is not None:
+            ahora = datetime.datetime.now(datetime.timezone.utc)
+            doc = {
+                "timestamp": ahora,
+                "expire_at": ahora + datetime.timedelta(days=_LOGS_DEBUG_TTL_DIAS),
+                "tipo": "debug",
+                "mensaje": str(mensaje)[:2000],
+                "uuid": _machine_uuid or "",
+                "hostname": _obtener_hostname(),
+                "version_agente": VERSION_AGENTE if 'VERSION_AGENTE' in globals() else "?",
+            }
+            threading.Thread(target=_escribir_log_firestore_async, args=(doc,), daemon=True).start()
+    except Exception:
         pass
 
 
@@ -175,6 +200,10 @@ def set_machine_uuid(uuid):
 
 _REGISTRY_KEY = r"SOFTWARE\AgenteBacar"
 _REGISTRY_VALUE = "machine_id"
+
+# ── logs_debug: persistencia de agente_debug.txt en Firestore ──────────────
+_LOGS_DEBUG_COLLECTION = "logs_debug"
+_LOGS_DEBUG_TTL_DIAS = 30  # días hasta que limpiar_logs_debug_viejos borra el doc
 
 
 def _leer_machine_id_registro() -> str | None:
@@ -558,6 +587,70 @@ def reportar_post_actualizacion_agente_si_aplica(uuid_pc):
     )
 
 
+def flush_logs_arranque(uuid_pc, hostname, cola):
+    """
+    Sube a Firestore en un batch los logs de arranque acumulados en 'cola'
+    antes de que Firebase estuviera disponible. Vacía la lista al terminar.
+    Se ejecuta en un hilo daemon para no bloquear el arranque del servicio.
+    """
+    if not cola:
+        return
+    mensajes = list(cola)
+    cola.clear()
+
+    def _flush():
+        try:
+            ahora = datetime.datetime.now(datetime.timezone.utc)
+            expire = ahora + datetime.timedelta(days=_LOGS_DEBUG_TTL_DIAS)
+            batch = db.batch()
+            for msg in mensajes:
+                ref = db.collection(_LOGS_DEBUG_COLLECTION).document()
+                batch.set(ref, {
+                    "timestamp": ahora,
+                    "expire_at": expire,
+                    "tipo": "arranque",
+                    "mensaje": str(msg)[:2000],
+                    "uuid": uuid_pc or "",
+                    "hostname": hostname or _obtener_hostname(),
+                    "version_agente": VERSION_AGENTE or "?",
+                })
+            batch.commit()
+        except Exception:
+            pass
+
+    threading.Thread(target=_flush, daemon=True).start()
+
+
+def limpiar_logs_debug_viejos():
+    """
+    Borra en background hasta 100 documentos de logs_debug cuyo expire_at ya pasó.
+    Se llama una vez por día desde enviar_datos_pc.
+    """
+    def _limpiar():
+        try:
+            ahora = datetime.datetime.now(datetime.timezone.utc)
+            docs = (
+                db.collection(_LOGS_DEBUG_COLLECTION)
+                .where("expire_at", "<", ahora)
+                .limit(100)
+                .get()
+            )
+            if not docs:
+                return
+            batch = db.batch()
+            count = 0
+            for doc in docs:
+                batch.delete(doc.reference)
+                count += 1
+            if count > 0:
+                batch.commit()
+                log_debug(f"limpiar_logs_debug: {count} docs expirados eliminados de {_LOGS_DEBUG_COLLECTION}")
+        except Exception as e:
+            log_debug(f"limpiar_logs_debug error: {type(e).__name__}: {e}")
+
+    threading.Thread(target=_limpiar, daemon=True).start()
+
+
 # ==================== SISTEMA DE CONTADORES ====================
 _contadores = {
     'sincronizaciones_totales': 0,
@@ -567,7 +660,8 @@ _contadores = {
     'ultima_sync_perifericos': 0,
     'ultima_sync_updates': 0,
     'ultima_sync_software': 0,
-    'ultima_sync_programas': 0
+    'ultima_sync_programas': 0,
+    'ultima_limpieza_debug': 0,
 }
 
 _hashes_memoria = {}
@@ -793,6 +887,11 @@ def enviar_datos_pc(datos, forzar_completo=False):
                 actualizacion["software_critico"] = datos["software_critico"]
                 _contadores['ultima_sync_software'] = tiempo_actual
                 log_debug("Actualizando software critico")
+
+        # Limpieza de logs_debug expirados: una vez por día (86400 seg)
+        if tiempo_actual - _contadores['ultima_limpieza_debug'] >= 86400:
+            limpiar_logs_debug_viejos()
+            _contadores['ultima_limpieza_debug'] = tiempo_actual
 
         doc_ref = db.collection(FIREBASE_COLLECTION_NAME).document(document_id)
         try:
