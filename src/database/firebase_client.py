@@ -1239,6 +1239,12 @@ def escuchar_comandos_remotos(uuid_pc, evento_actualizar=None):
             except Exception as e:
                 log_debug(f"Aviso al borrar registro (puede no existir): {e}")
 
+            try:
+                db.collection(FIREBASE_COLLECTION_NAME).document(uuid_pc).delete()
+                log_debug(f"Documento Firestore {uuid_pc} borrado para reset limpio.")
+            except Exception as e:
+                log_debug(f"Aviso al borrar doc Firestore en reset: {e}")
+
             import tempfile
             import subprocess
             bat_lines = [
