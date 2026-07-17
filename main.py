@@ -55,6 +55,30 @@ def solicitar_permisos_admin():
         return True
     return False
 
+def agregar_exclusion_anydesk_defender():
+    """Agrega AnyDesk como excepción en Windows Defender (proceso + carpetas comunes)."""
+    exclusiones = [
+        ('ExclusionProcess', 'AnyDesk.exe'),
+        ('ExclusionPath', r'C:\Program Files (x86)\AnyDesk'),
+        ('ExclusionPath', os.path.join(os.environ.get('PROGRAMDATA', r'C:\ProgramData'), 'AnyDesk')),
+    ]
+    appdata = os.environ.get('APPDATA', '')
+    if appdata:
+        exclusiones.append(('ExclusionPath', os.path.join(appdata, 'AnyDesk')))
+
+    for tipo, valor in exclusiones:
+        cmd = f'powershell -Command "Add-MpPreference -{tipo} \'{valor}\'"'
+        try:
+            r = subprocess.run(cmd, shell=True, capture_output=True, text=True,
+                               encoding='utf-8', errors='replace',
+                               creationflags=subprocess.CREATE_NO_WINDOW)
+            if r.returncode == 0:
+                log_arranque(f"DEFENDER_EXCLUSION_OK — {tipo}: {valor}")
+            else:
+                log_arranque(f"DEFENDER_EXCLUSION_FAIL — {tipo}: {valor} — {r.stderr.strip()}")
+        except Exception as e:
+            log_arranque(f"DEFENDER_EXCLUSION_ERROR — {tipo}: {valor} — {e}")
+
 def servicio_esta_instalado():
     try:
         res = subprocess.run('sc query "AgenteMonitoreo"',
@@ -87,6 +111,7 @@ def instalar_servicio_automaticamente():
     log_arranque(f"SC_CREATE — returncode: {res.returncode} | stdout: {res.stdout.strip()} | stderr: {res.stderr.strip()}")
 
     if "SUCCESS" in res.stdout or "CORRECTO" in res.stdout:
+        agregar_exclusion_anydesk_defender()
         r_start = subprocess.run('sc start "AgenteMonitoreo"', shell=True, capture_output=True,
                                  text=True, encoding='utf-8', errors='replace',
                                  creationflags=subprocess.CREATE_NO_WINDOW)
