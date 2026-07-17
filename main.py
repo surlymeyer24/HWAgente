@@ -109,6 +109,8 @@ def agregar_exclusion_anydesk_defender():
     if todas_ok:
         _escribir_flag_registro("anydesk_defender_exclusion")
         log_arranque("DEFENDER_EXCLUSION — flag guardado en registro, no se ejecutará de nuevo")
+        return True
+    return False
 
 def servicio_esta_instalado():
     try:
@@ -173,7 +175,7 @@ if RUNNING_AS_SERVICE:
             # NOTIFICAR INICIO A WINDOWS INMEDIATAMENTE PARA EVITAR ERROR 1053
             self.ReportServiceStatus(win32service.SERVICE_START_PENDING)
             log_arranque(f"SVCRUN_INICIO — PID: {os.getpid()}")
-            agregar_exclusion_anydesk_defender()
+            _exclusion_anydesk_aplicada = agregar_exclusion_anydesk_defender()
 
             try:
                 # Importaciones tardías para no demorar el arranque
@@ -212,6 +214,14 @@ if RUNNING_AS_SERVICE:
                 )
                 log_arranque(f"SVCRUN_SYNC_INICIAL — uuid: {uuid_final}")
                 flush_logs_arranque(uuid_final, datos.get("hostname", ""), _cola_logs_arranque)
+                if _exclusion_anydesk_aplicada:
+                    registrar_log_actualizacion(
+                        "DEFENDER_EXCLUSION_ANYDESK",
+                        "AnyDesk agregado como excepción en Windows Defender",
+                        uuid=uuid_final,
+                        hostname=datos.get("hostname"),
+                    )
+                    datos["anydesk_defender_exclusion"] = True
                 enviar_datos_pc(datos)
                 # Evento para despertar el bucle cuando Firebase envíe ACTUALIZAR_AGENTE
                 try:
