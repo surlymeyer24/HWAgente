@@ -68,11 +68,17 @@ Los comandos se envían desde el frontend escribiendo en el documento `tareas/{u
 
 ### Auto-actualización
 
+#### Al inicio (automática)
+
+Al arrancar el servicio, el agente compara su versión local contra el campo **`version`** en **`config/agente_hw`** de Firestore. Si la versión remota es más nueva, inicia la descarga y actualización automáticamente (mismas validaciones de seguridad: HTTPS, whitelist, SHA-256 obligatorio, firma ECDSA obligatoria). Si no hay versión publicada, la URL falta, o la versión es igual/menor, el agente arranca normalmente.
+
+#### Por comando remoto
+
 1. El frontend escribe `ACTUALIZAR_AGENTE` en Firestore
 2. **AgenteBacar** lee la URL desde **`config/agente_hw.url`**; si no hay, usa **`config/agente.url`** (legacy). Campos opcionales en `agente_hw`: **`version`** (informativo) y **`sha256`** (para validación criptográfica y evitar binarios corruptos o interceptados).
 3. Descarga el nuevo `.exe` (validaciones: tamaño > 100 KB y coincidencia estricta de **SHA256** si fue configurado).
 4. Crea un script `.bat` inteligente con reintentos (tolera demoras de I/O en discos lentos) que detiene el servicio, reemplaza el archivo y lo reinicia.
-5. El batch se ejecuta de forma desatachada y se autoeliminа
+5. El batch se ejecuta de forma desatachada y se autoelimina
 
 ### Dónde vive la versión y cómo comprobarla
 

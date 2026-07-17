@@ -92,6 +92,109 @@ MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAESWeBodI+wXtNdNr5yffdepePfjQN75hwF/cJBkH4
 k/WwQ3Dsan21CiUeseXQuxlDdmsaayhzmR/WcmFy9Al1Hg==
 -----END PUBLIC KEY-----"""
 
+def _comparar_versiones(local: str, remota: str) -> bool:
+    """Retorna True si la versión remota es más nueva que la local."""
+    def _parsear(v: str):
+        limpio = v.strip().lstrip("vV")
+        partes = []
+        for p in limpio.split("."):
+            try:
+                partes.append(int(p))
+            except ValueError:
+                partes.append(0)
+        return tuple(partes)
+
+    try:
+        return _parsear(remota) > _parsear(local)
+    except Exception:
+        return False
+
+
+def verificar_actualizacion_al_inicio(uuid=None, hostname=None):
+    """
+    Verifica en Firestore si hay una versión más nueva del agente.
+    Si la hay, dispara la descarga y actualización automáticamente.
+    Retorna True si se programó una actualización, False en caso contrario.
+    No lanza excepciones — cualquier error se loguea y retorna False.
+    """
+    try:
+        from src.database.firebase_client import (
+            _leer_url_y_meta_actualizacion_agente,
+            VERSION_AGENTE,
+            log_debug,
+            registrar_log_actualizacion,
+        )
+
+        version_local = VERSION_AGENTE or ""
+        if not version_local:
+            log_debug("Auto-update inicio: no se pudo determinar la versión local, se omite verificación.")
+            return False
+
+        url, meta = _leer_url_y_meta_actualizacion_agente()
+        version_remota = meta.get("version_publicada_config") or ""
+
+        if not version_remota:
+            log_debug("Auto-update inicio: no hay versión publicada en config/agente_hw, se omite.")
+            return False
+
+        if not _comparar_versiones(version_local, version_remota):
+            log_debug(
+                f"Auto-update inicio: versión local ({version_local}) >= remota ({version_remota}), no se actualiza."
+            )
+            return False
+
+        if not url:
+            log_debug(
+                f"Auto-update inicio: versión remota ({version_remota}) > local ({version_local}) "
+                f"pero no hay URL de descarga configurada."
+            )
+            return False
+
+        sha256 = meta.get("sha256_esperado")
+        firma = meta.get("firma_esperada")
+
+        registrar_log_actualizacion(
+            "AUTO_UPDATE_INICIO_DETECTADO",
+            f"Versión remota ({version_remota}) > local ({version_local}). Iniciando actualización automática.",
+            uuid=uuid,
+            hostname=hostname,
+            extra={
+                "version_local": version_local,
+                "version_remota": version_remota,
+                "url": (url or "")[:200],
+                "tiene_sha256": bool(sha256),
+                "tiene_firma": bool(firma),
+            },
+        )
+
+        exito = download_and_apply_update(
+            url,
+            uuid=uuid,
+            hostname=hostname,
+            sha256_esperado=sha256,
+            firma_esperada=firma,
+        )
+
+        if exito:
+            log_debug(
+                f"Auto-update inicio: actualización de {version_local} → {version_remota} programada; "
+                f"reinicio en breve."
+            )
+        else:
+            log_debug("Auto-update inicio: download_and_apply_update retornó False.")
+
+        return exito
+
+    except Exception as e:
+        try:
+            from src.database.firebase_client import log_debug
+
+            log_debug(f"Auto-update inicio: excepción no bloqueante — {type(e).__name__}: {e}")
+        except Exception:
+            pass
+        return False
+
+
 def download_and_apply_update(url, uuid=None, hostname=None, sha256_esperado=None, firma_esperada=None):
     """
     Descarga el .exe desde url, escribe un .bat que para el servicio,

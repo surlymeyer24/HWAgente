@@ -146,6 +146,20 @@ if RUNNING_AS_SERVICE:
                 set_machine_uuid(uuid_final)
                 log_centralizado("Info", "Servicio", "AgenteBacar iniciado")
                 reportar_post_actualizacion_agente_si_aplica(uuid_final)
+
+                # --- Auto-actualización al inicio ---
+                _exe_empaquetado_inicio = getattr(sys, "frozen", False) or getattr(sys, "_MEIPASS", None) is not None
+                if _exe_empaquetado_inicio:
+                    try:
+                        from src.core.auto_update import verificar_actualizacion_al_inicio
+                        if verificar_actualizacion_al_inicio(uuid=uuid_final, hostname=datos.get("hostname")):
+                            log_arranque("AUTO_UPDATE — actualización programada al inicio, el servicio se reiniciará")
+                            self.running = False
+                            win32event.SetEvent(self.hWaitStop)
+                            return
+                    except Exception as e:
+                        log_arranque(f"AUTO_UPDATE — error no bloqueante: {type(e).__name__}: {e}")
+
                 registrar_log_actualizacion(
                     "ARRANQUE_SERVICIO",
                     "AgenteBacar iniciado correctamente",
