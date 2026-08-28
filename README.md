@@ -44,7 +44,7 @@ Agente de monitoreo IT para Windows. Se instala como servicio del sistema, recop
 
 ### Detección de periféricos
 
-- **Monitores**: nombre, resolución, tamaño físico en cm y pulgadas
+- **Monitores**: nombre, resolución, tamaño físico en cm y pulgadas, número de serie y fabricante (vía EDID/WmiMonitorID)
 - **Teclado y mouse**: detectados desde dispositivos USB HID, con marca si está disponible; campo `conexion` en Firestore (`usb`, `inalambrico_usb`, `bluetooth`) cuando se puede inferir (nombre del dongle, **PID USB de receptores Logitech** alineado con Solaar/Unifying-Bolt-Lightspeed, o Bluetooth)
 - **Otros USB**: almacenamiento, cámaras, adaptadores Bluetooth, impresoras USB, etc.
 - **Audio**: dispositivos de salida (parlantes, auriculares)
@@ -189,10 +189,30 @@ Aplicación **React + TypeScript + Vite** que lee la colección **`computadoras`
 
 ---
 
+## Módulo independiente de etiquetas QR (`etiquetas-qr`)
+
+Aplicación **React + TypeScript + Vite** para identificar físicamente las
+computadoras durante traslados. Un usuario autenticado genera e imprime un QR por
+PC. Cualquier persona puede escanearlo sin iniciar sesión y la ficha muestra
+exclusivamente **hostname** y **ubicación**.
+
+- Panel de generación: `/`
+- Ficha pública: `/e/{token}`
+- Colección privada: `etiquetas_qr_admin`
+- Colección pública mínima: `fichas_qr`
+
+El token es aleatorio y la ficha pública no contiene el UUID de la computadora,
+IPs, usuarios, software ni telemetría. Las reglas permiten obtener una ficha por
+token, pero no listar públicamente la colección. Instrucciones de desarrollo y
+despliegue: **`etiquetas-qr/README.md`**.
+
+---
+
 ## Estructura del proyecto
 
 ```
 MiniAgente/
+├── etiquetas-qr/                # Módulo independiente de etiquetas físicas
 ├── MiniAgente-Front/            # Dashboard web (Vite + React); ver README dentro de la carpeta
 ├── main.py                      # Entry point, lógica del servicio Windows
 ├── verificar_actualizaciones.py # Lista version_agente y último comando por PC (Firebase)

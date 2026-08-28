@@ -31,23 +31,39 @@ def obtener_monitores():
     try:
         # PowerShell para obtener info de monitores con WMI
         ps_script = """
-        Get-WmiObject -Namespace root\\wmi -Class WmiMonitorBasicDisplayParams | 
+        $monitorIds = Get-WmiObject -Namespace root\\wmi -Class WmiMonitorID
+        Get-WmiObject -Namespace root\\wmi -Class WmiMonitorBasicDisplayParams |
         ForEach-Object {
             $monitor = $_
             $id = $monitor.InstanceName
-            
-            # Obtener nombre del monitor
-            $name = (Get-WmiObject -Namespace root\\wmi -Class WmiMonitorID | 
-                    Where-Object {$_.InstanceName -eq $id}).UserFriendlyName
-            
+
+            $idObj = $monitorIds | Where-Object {$_.InstanceName -eq $id}
+
+            $name = $idObj.UserFriendlyName
             if ($name) {
-                $nameStr = -join ($name | ForEach-Object {[char]$_})
+                $nameStr = -join ($name | Where-Object {$_ -ne 0} | ForEach-Object {[char]$_})
             } else {
                 $nameStr = "Monitor Genérico"
             }
-            
+
+            $serial = $idObj.SerialNumberID
+            if ($serial) {
+                $serialStr = -join ($serial | Where-Object {$_ -ne 0} | ForEach-Object {[char]$_})
+            } else {
+                $serialStr = ""
+            }
+
+            $mfr = $idObj.ManufacturerName
+            if ($mfr) {
+                $mfrStr = -join ($mfr | Where-Object {$_ -ne 0} | ForEach-Object {[char]$_})
+            } else {
+                $mfrStr = ""
+            }
+
             [PSCustomObject]@{
                 Nombre = $nameStr
+                NumeroSerie = $serialStr
+                Fabricante = $mfrStr
                 AnchoMM = $monitor.MaxHorizontalImageSize
                 AltoMM = $monitor.MaxVerticalImageSize
                 AnchoCM = [math]::Round($monitor.MaxHorizontalImageSize / 10, 1)
@@ -73,15 +89,22 @@ def obtener_monitores():
                 datos = [datos]
             
             for monitor in datos:
-                monitores.append({
+                entry = {
                     'nombre': monitor.get('Nombre', 'Desconocido').strip(),
                     'ancho_cm': monitor.get('AnchoCM', 0),
                     'alto_cm': monitor.get('AltoCM', 0),
                     'pulgadas': calcular_pulgadas(
-                        monitor.get('AnchoCM', 0), 
+                        monitor.get('AnchoCM', 0),
                         monitor.get('AltoCM', 0)
-                    )
-                })
+                    ),
+                }
+                serial = (monitor.get('NumeroSerie') or '').strip()
+                if serial:
+                    entry['numero_serie'] = serial
+                fabricante = (monitor.get('Fabricante') or '').strip()
+                if fabricante:
+                    entry['fabricante'] = fabricante
+                monitores.append(entry)
         
         # Obtener resoluciones actuales
         resoluciones = obtener_resoluciones_monitores()
