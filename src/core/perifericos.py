@@ -977,7 +977,8 @@ def obtener_dispositivos_usb():
             if teclados:
                 n = len(teclados)
                 t0 = teclados[0]
-                otros.append({
+                t0_iid = t0.get('_instance_id', '')
+                entrada_teclado = {
                     'nombre': 'Teclado' + (f' ({n} dispositivos)' if n > 1 else ''),
                     'categoria': 'Teclado',
                     'fabricante': _extraer_marca(t0) if n == 1 else '—',
@@ -987,16 +988,26 @@ def obtener_dispositivos_usb():
                         for d in teclados
                     ),
                     'conexion': _inferir_conexion(
-                        t0.get('_instance_id', ''),
+                        t0_iid,
                         vids_receptores,
                         t0.get('nombre', ''),
                         t0.get('_bus_desc', ''),
                     ),
-                })
+                }
+                # VID/PID del dispositivo principal (útil para inventario / dedup)
+                if n == 1:
+                    vid = _extraer_vid(t0_iid)
+                    pid = _extraer_pid(t0_iid)
+                    if vid:
+                        entrada_teclado['vid'] = vid
+                    if pid:
+                        entrada_teclado['pid'] = pid
+                otros.append(entrada_teclado)
             if mouses:
                 n = len(mouses)
                 m0 = mouses[0]
-                otros.append({
+                m0_iid = m0.get('_instance_id', '')
+                entrada_mouse = {
                     'nombre': 'Mouse' + (f' ({n} dispositivos)' if n > 1 else ''),
                     'categoria': 'Mouse',
                     'fabricante': _extraer_marca(m0) if n == 1 else '—',
@@ -1006,12 +1017,20 @@ def obtener_dispositivos_usb():
                         for d in mouses
                     ),
                     'conexion': _inferir_conexion(
-                        m0.get('_instance_id', ''),
+                        m0_iid,
                         vids_receptores,
                         m0.get('nombre', ''),
                         m0.get('_bus_desc', ''),
                     ),
-                })
+                }
+                if n == 1:
+                    vid = _extraer_vid(m0_iid)
+                    pid = _extraer_pid(m0_iid)
+                    if vid:
+                        entrada_mouse['vid'] = vid
+                    if pid:
+                        entrada_mouse['pid'] = pid
+                otros.append(entrada_mouse)
             if otros_hid:
                 n = len(otros_hid)
                 otros.append({
@@ -1081,6 +1100,8 @@ def formatear_dispositivos_usb(dispositivos: list, usar_emoji: bool = False) -> 
         nombre = d.get('nombre', 'Desconocido')
         fab = d.get('fabricante', '')
         cx = d.get('conexion')
+        vid = d.get('vid')
+        pid = d.get('pid')
         sufijo_cx = ""
         if cx == "bluetooth":
             sufijo_cx = " [Bluetooth]"
@@ -1088,10 +1109,18 @@ def formatear_dispositivos_usb(dispositivos: list, usar_emoji: bool = False) -> 
             sufijo_cx = " [Inalámbrico USB]"
         elif cx == "usb":
             sufijo_cx = " [USB cableado]"
+        sufijo_ids = ""
+        if vid or pid:
+            partes_ids = []
+            if vid:
+                partes_ids.append(f"VID_{vid}")
+            if pid:
+                partes_ids.append(f"PID_{pid}")
+            sufijo_ids = f" [{'/'.join(partes_ids)}]"
         if fab and fab != '—' and fab not in nombre:
-            lineas.append(f"      • {nombre} ({fab}){sufijo_cx}")
+            lineas.append(f"      • {nombre} ({fab}){sufijo_cx}{sufijo_ids}")
         else:
-            lineas.append(f"      • {nombre}{sufijo_cx}")
+            lineas.append(f"      • {nombre}{sufijo_cx}{sufijo_ids}")
     
     return '\n'.join(lineas).strip() if lineas else "  No se detectaron periféricos USB"
 

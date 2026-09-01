@@ -45,7 +45,7 @@ Agente de monitoreo IT para Windows. Se instala como servicio del sistema, recop
 ### Detección de periféricos
 
 - **Monitores**: nombre, resolución, tamaño físico en cm y pulgadas, número de serie y fabricante (vía EDID/WmiMonitorID)
-- **Teclado y mouse**: detectados desde dispositivos USB HID, con marca si está disponible; campo `conexion` en Firestore (`usb`, `inalambrico_usb`, `bluetooth`) cuando se puede inferir (nombre del dongle, **PID USB de receptores Logitech** alineado con Solaar/Unifying-Bolt-Lightspeed, o Bluetooth)
+- **Teclado y mouse**: detectados desde dispositivos USB HID, con marca si está disponible; campo `conexion` en Firestore (`usb`, `inalambrico_usb`, `bluetooth`) cuando se puede inferir (nombre del dongle, **PID USB de receptores Logitech** alineado con Solaar/Unifying-Bolt-Lightspeed, o Bluetooth); también se persisten `vid` y `pid` (hex, p. ej. `046D` / `C52B`) cuando el InstanceId PnP los expone y hay un único dispositivo de ese tipo
 - **Otros USB**: almacenamiento, cámaras, adaptadores Bluetooth, impresoras USB, etc.
 - **Audio**: dispositivos de salida (parlantes, auriculares)
 - **Impresoras**: tipo (local/red), driver, puerto, estado, impresora predeterminada

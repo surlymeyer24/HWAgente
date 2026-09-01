@@ -4,7 +4,12 @@
       "Bash(dir \"C:\\\\Users\\\\Usr\\\\Documents\\\\MiniAgente\" /b)",
       "Bash(Get-ChildItem -Path \"D:\\\\Desarrollo\\\\MiniAgente\" -Recurse -File)",
       "Bash(Select-Object -ExpandProperty FullName)",
-      "Bash(Sort-Object)"
+      "Bash(Sort-Object)",
+      "Bash(git add *)",
+      "Bash(ls \"C:\\\\Users\\\\Usr\\\\Documents\\\\Desarrollo\" | grep -i -E \"mini|agente|front\")",
+      "Bash(find \"C:\\\\Users\\\\Usr\\\\Documents\\\\Desarrollo\" -maxdepth 3 -type d -iname \"*front*\" 2>/dev/null)",
+      "Bash(find \"C:\\\\Users\\\\Usr\\\\Documents\" -maxdepth 5 -type d -iname \"*MiniAgente*Front*\" 2>/dev/null)",
+      "Bash(find \"D:\\\\\\\\\" -maxdepth 3 -type d -iname \"*miniagente*\" 2>/dev/null | head -10)"
     ]
   }
 }

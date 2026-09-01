@@ -12,6 +12,72 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
+    // =========================================================================
+    // Modelo del módulo independiente de etiquetas QR
+    // =========================================================================
+    // etiquetas_qr_admin/{token} (privado, solo usuarios autenticados):
+    //   machineId: string (1..150), hostname: string (1..100),
+    //   ubicacion: string (1..120), activa: bool,
+    //   creadaEn: timestamp inmutable, actualizadaEn: timestamp.
+    //
+    // fichas_qr/{token} (lectura pública solo por ID, sin listado público):
+    //   hostname: string (1..100), ubicacion: string (1..120),
+    //   activa: bool, actualizadaEn: timestamp.
+    // No contiene UUID, IP, usuario, software ni datos operativos del agente.
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isValidEtiquetaAdmin(data) {
+      let source = get(/databases/$(database)/documents/computadoras/$(data.machineId));
+      return data.keys().hasAll([
+          'machineId', 'hostname', 'ubicacion', 'activa',
+          'creadaEn', 'actualizadaEn'
+        ])
+        && data.keys().hasOnly([
+          'machineId', 'hostname', 'ubicacion', 'activa',
+          'creadaEn', 'actualizadaEn'
+        ])
+        && data.machineId is string
+        && data.machineId.size() >= 1
+        && data.machineId.size() <= 150
+        && data.hostname is string
+        && data.hostname.size() >= 1
+        && data.hostname.size() <= 100
+        && data.ubicacion is string
+        && data.ubicacion.size() >= 1
+        && data.ubicacion.size() <= 120
+        && data.activa is bool
+        && data.creadaEn is timestamp
+        && data.actualizadaEn is timestamp
+        && source.data.hostname == data.hostname
+        && source.data.ubicacion == data.ubicacion;
+    }
+
+    function isValidFichaPublica(data, token) {
+      let admin = getAfter(
+        /databases/$(database)/documents/etiquetas_qr_admin/$(token)
+      );
+      return data.keys().hasAll([
+          'hostname', 'ubicacion', 'activa', 'actualizadaEn'
+        ])
+        && data.keys().hasOnly([
+          'hostname', 'ubicacion', 'activa', 'actualizadaEn'
+        ])
+        && data.hostname is string
+        && data.hostname.size() >= 1
+        && data.hostname.size() <= 100
+        && data.ubicacion is string
+        && data.ubicacion.size() >= 1
+        && data.ubicacion.size() <= 120
+        && data.activa is bool
+        && data.actualizadaEn is timestamp
+        && admin.data.hostname == data.hostname
+        && admin.data.ubicacion == data.ubicacion
+        && admin.data.activa == data.activa;
+    }
+
     // -------------------------------------------------------------------------
     // config/ — COMPLETAMENTE CERRADO al SDK cliente
     // -------------------------------------------------------------------------
@@ -70,6 +136,32 @@ service cloud.firestore {
     match /cyberwatch_logs/{logId} {
       allow read: if request.auth != null;
       allow write: if false;
+    }
+
+    // -------------------------------------------------------------------------
+    // Etiquetas QR — administración autenticada y ficha mínima pública
+    // -------------------------------------------------------------------------
+    match /etiquetas_qr_admin/{token} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated()
+        && isValidEtiquetaAdmin(request.resource.data)
+        && request.resource.data.creadaEn == request.time
+        && request.resource.data.actualizadaEn == request.time;
+      allow update: if isAuthenticated()
+        && isValidEtiquetaAdmin(request.resource.data)
+        && request.resource.data.machineId == resource.data.machineId
+        && request.resource.data.creadaEn == resource.data.creadaEn
+        && request.resource.data.actualizadaEn == request.time;
+      allow delete: if false;
+    }
+
+    match /fichas_qr/{token} {
+      allow get: if resource.data.activa == true;
+      allow list: if isAuthenticated();
+      allow create, update: if isAuthenticated()
+        && isValidFichaPublica(request.resource.data, token)
+        && request.resource.data.actualizadaEn == request.time;
+      allow delete: if false;
     }
   }
 }

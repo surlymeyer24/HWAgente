@@ -1,0 +1,58 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+
+:root {
+  --ink: #0e0f36;
+  --muted: #5f6368;
+  --paper: #eef0f4;
+  --line: #c8cdd5;
+  --blue: #ba1814;
+  --blue-dark: #0e0f36;
+  --blue-wash: #fde9e8;
+  --yellow: #ba1814;
+  --focus: #ba1814;
+  --shadow: 0 24px 64px #0e0f3673, 0 4px 16px #0e0f3633;
+  --display: 'Inter', system-ui, sans-serif;
+  --body: 'Inter', system-ui, sans-serif;
+  --utility: 'JetBrains Mono', ui-monospace, Consolas, monospace;
+
+  color: #202124;
+  background: var(--paper);
+  font: 17px/1.6 var(--body);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  min-width: 320px;
+  min-height: 100%;
+}
+
+body {
+  min-width: 320px;
+  min-height: 100svh;
+  margin: 0;
+}
+
+body:has(.login-shell) {
+  background: #02040a;
+  color: #e2e8f0;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+h1,
+h2 {
+  color: var(--ink);
+  font-family: var(--display);
+  font-weight: 800;
+  letter-spacing: -0.025em;
+}

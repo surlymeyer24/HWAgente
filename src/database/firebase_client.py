@@ -1310,6 +1310,29 @@ def escuchar_comandos_remotos(uuid_pc, evento_actualizar=None):
     _tareas_snapshot_watch = tareas_ref.on_snapshot(on_snapshot)
 
 
+def _valor_json(v):
+    """Convierte valores Firestore (timestamps anidados, listas, dicts) a tipos JSON."""
+    from datetime import datetime, date
+    if v is None or isinstance(v, (str, int, float, bool)):
+        return v
+    if isinstance(v, datetime):
+        return v.isoformat()
+    if isinstance(v, date):
+        return v.isoformat()
+    if hasattr(v, "timestamp") and not isinstance(v, (dict, list)):
+        try:
+            return datetime.utcfromtimestamp(v.timestamp()).isoformat() + "Z"
+        except Exception:
+            return str(v)
+    if isinstance(v, dict):
+        return {k: _valor_json(x) for k, x in v.items()}
+    if isinstance(v, (list, tuple)):
+        return [_valor_json(x) for x in v]
+    if hasattr(v, "isoformat"):
+        return v.isoformat()
+    return str(v)
+
+
 def _doc_to_dict(doc):
     """Convierte un documento Firestore a dict JSON-serializable (timestamps -> ISO string)."""
     if doc is None or not getattr(doc, "exists", False):
@@ -1317,19 +1340,7 @@ def _doc_to_dict(doc):
     d = doc.to_dict()
     if not d:
         return d
-    from datetime import datetime
-    out = {}
-    for k, v in d.items():
-        if hasattr(v, "isoformat"):  # datetime / date
-            out[k] = v.isoformat() if hasattr(v, "isoformat") else str(v)
-        elif hasattr(v, "timestamp"):  # Firestore SERVER_TIMESTAMP result
-            try:
-                out[k] = datetime.utcfromtimestamp(v.timestamp()).isoformat() + "Z"
-            except Exception:
-                out[k] = str(v)
-        else:
-            out[k] = v
-    return out
+    return _valor_json(d)
 
 
 def exportar_estado_firestore():
