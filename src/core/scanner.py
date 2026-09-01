@@ -5,6 +5,7 @@ import os
 import sys
 import gc
 import json
+import re
 import time
 import requests
 import win32evtlog
@@ -137,51 +138,259 @@ def inicializar_cache():
             'ram_total_gb': round(psutil.virtual_memory().total / (1024 ** 3), 2),
             'info_discos': obtener_info_discos_fisicos(),      # modelo + tipo por DeviceId
             'mapa_particiones': obtener_mapa_particiones(),    # letra → número disco
-            'modulos_ram': obtener_modulos_ram(),
+            'modulos_ram': None,
+            'ram_placa': {},
             'windows_version_detallada': obtener_windows_version_detallada(),
             'tipo_equipo': obtener_tipo_equipo(),
         }
+        modulos_ram, ram_placa = _obtener_ram_completa()
+        _CACHE_ESTATICO['modulos_ram'] = modulos_ram
+        _CACHE_ESTATICO['ram_placa'] = ram_placa
     return _CACHE_ESTATICO
 
 
 # ==================== 1. SALUD DEL DISCO ====================
-def obtener_modulos_ram():
-    """Obtiene marca, modelo y velocidad de cada módulo RAM físico via WMI"""
-    modulos = []
+
+_SMBIOS_MEMORIA = {
+    20: 'DDR',
+    21: 'DDR2',
+    24: 'DDR3',
+    26: 'DDR4',
+    34: 'DDR5',
+}
+_FORM_FACTOR_RAM = {
+    8: 'DIMM',
+    12: 'SODIMM',
+}
+_PINES_RAM = {
+    ('DDR3', 'DIMM'): 240,
+    ('DDR3', 'SODIMM'): 204,
+    ('DDR4', 'DIMM'): 288,
+    ('DDR4', 'SODIMM'): 260,
+    ('DDR5', 'DIMM'): 288,
+    ('DDR5', 'SODIMM'): 262,
+}
+_CANALES_TIPICOS = ('A', 'B', 'C', 'D')
+_FABRICANTES_RAM_GENERICOS = frozenset({
+    '', 'unknown', '04cb', 'manufacturer', 'not specified',
+})
+
+
+def _int_wmi(valor, default=0):
     try:
-        ps_script = """
-        Get-WmiObject Win32_PhysicalMemory |
-        Select-Object Manufacturer, PartNumber,
-                      @{Name='CapacidadGB';Expression={[math]::Round($_.Capacity / 1GB, 0)}},
-                      Speed |
-        ConvertTo-Json
+        if valor is None or valor == '':
+            return default
+        return int(valor)
+    except (TypeError, ValueError):
+        return default
+
+
+def _tecnologia_ram(smbios_type):
+    return _SMBIOS_MEMORIA.get(_int_wmi(smbios_type), 'Desconocido')
+
+
+def _form_factor_ram(codigo):
+    return _FORM_FACTOR_RAM.get(_int_wmi(codigo))
+
+
+def _extraer_canal_ram(*textos):
+    blob = ' '.join(t for t in textos if t)
+    if not blob:
+        return 'N/A'
+    m = re.search(r'CHANNEL\s*([A-D])', blob, re.IGNORECASE)
+    if m:
+        return m.group(1).upper()
+    m = re.search(r'CANAL\s*([A-D])', blob, re.IGNORECASE)
+    if m:
+        return m.group(1).upper()
+    m = re.search(r'\bDIMM\s*([A-D])\d*\b', blob, re.IGNORECASE)
+    if m:
+        return m.group(1).upper()
+    return 'N/A'
+
+
+def _serial_ram(raw):
+    serial = (raw or '').strip()
+    if not serial or set(serial) <= {'0'}:
+        return 'N/A'
+    return serial
+
+
+def _fabricante_ram(raw):
+    fabricante = (raw or '').strip()
+    if fabricante.lower() in _FABRICANTES_RAM_GENERICOS:
+        return 'Desconocido'
+    return fabricante or 'Desconocido'
+
+
+def _pines_ram(tecnologia, form_factor):
+    if not tecnologia or not form_factor:
+        return None
+    return _PINES_RAM.get((tecnologia, form_factor))
+
+
+def _voltaje_ram_v(mv):
+    n = _int_wmi(mv, 0)
+    if n <= 0:
+        return None
+    # WMI ConfiguredVoltage suele venir en milivoltios (1200 → 1.2 V)
+    return round(n / 1000.0, 2) if n >= 100 else round(n / 1.0, 2)
+
+
+def _kb_a_gb(kb):
+    n = _int_wmi(kb, 0)
+    if n <= 0:
+        return None
+    return round(n / (1024 * 1024), 0)
+
+
+def _listar_wmi(valor):
+    if not valor:
+        return []
+    if isinstance(valor, dict):
+        return [valor]
+    if isinstance(valor, list):
+        return valor
+    return []
+
+
+def _siguiente_canal_vacio(usados, slots_totales):
+    pool = _CANALES_TIPICOS[: max(slots_totales, 0) or 4]
+    for c in pool:
+        if c not in usados:
+            return c
+    return 'N/A'
+
+
+def _entrada_slot_vacio(indice, canal):
+    nombre = f'Slot {indice}'
+    return {
+        'ocupado': False,
+        'slot': nombre,
+        'locator': nombre,
+        'banco': 'N/A',
+        'canal': canal,
+        'fabricante': 'N/A',
+        'modelo': 'N/A',
+        'capacidad_gb': 0,
+        'velocidad_mhz': 0,
+        'numero_serie': 'N/A',
+    }
+
+
+def _obtener_ram_completa():
+    """
+    Lista una entrada por ranura (ocupadas + vacías) y un resumen de placa.
+    """
+    modulos = []
+    placa = {
+        'slots_totales': 0,
+        'slots_ocupados': 0,
+        'canal_modo': 'single',
+    }
+    try:
+        ps_script = r"""
+        $mods = @(Get-CimInstance Win32_PhysicalMemory -ErrorAction SilentlyContinue |
+            Select-Object Manufacturer, PartNumber, SerialNumber, DeviceLocator, BankLabel,
+                          Capacity, Speed, ConfiguredClockSpeed, SMBIOSMemoryType, FormFactor,
+                          DataWidth, ConfiguredVoltage)
+        $arrs = @(Get-CimInstance Win32_PhysicalMemoryArray -ErrorAction SilentlyContinue |
+            Select-Object MemoryDevices, MaxCapacity, MaxCapacityEx)
+        [PSCustomObject]@{ Modulos = $mods; Arrays = $arrs } | ConvertTo-Json -Compress -Depth 5
         """
         resultado = subprocess.run(
             ['powershell', '-NoProfile', '-Command', ps_script],
             capture_output=True,
             text=True,
             encoding='utf-8', errors='replace',
-            timeout=10,
+            timeout=15,
             creationflags=subprocess.CREATE_NO_WINDOW
         )
-        if resultado.returncode == 0 and resultado.stdout.strip():
-            datos = json.loads(resultado.stdout)
-            if isinstance(datos, dict):
-                datos = [datos]
-            for m in datos:
-                fabricante = (m.get('Manufacturer') or '').strip()
-                part = (m.get('PartNumber') or '').strip()
-                # Limpiar valores genéricos que no aportan info
-                if fabricante.lower() in ('', 'unknown', '04cb', 'manufacturer', 'not specified'):
-                    fabricante = ''
-                modulos.append({
-                    'fabricante': fabricante or 'Desconocido',
-                    'modelo': part or 'N/A',
-                    'capacidad_gb': m.get('CapacidadGB', 0),
-                    'velocidad_mhz': m.get('Speed', 0) or 0,
-                })
+        if resultado.returncode != 0 or not resultado.stdout.strip():
+            return modulos, placa
+
+        datos = json.loads(resultado.stdout)
+        raw_mods = _listar_wmi(datos.get('Modulos'))
+        raw_arrs = _listar_wmi(datos.get('Arrays'))
+
+        slots_totales = 0
+        max_kb = 0
+        for arr in raw_arrs:
+            slots_totales += _int_wmi(arr.get('MemoryDevices'), 0)
+            max_kb = max(
+                max_kb,
+                _int_wmi(arr.get('MaxCapacityEx'), 0),
+                _int_wmi(arr.get('MaxCapacity'), 0),
+            )
+        if slots_totales <= 0:
+            slots_totales = len(raw_mods)
+
+        canales_ocupados = []
+        for i, m in enumerate(raw_mods, start=1):
+            locator = (m.get('DeviceLocator') or '').strip()
+            banco = (m.get('BankLabel') or '').strip()
+            nombre_slot = f'Slot {i}'
+            if not locator:
+                locator = nombre_slot
+            canal = _extraer_canal_ram(banco, locator)
+            tecnologia = _tecnologia_ram(m.get('SMBIOSMemoryType'))
+            form_factor = _form_factor_ram(m.get('FormFactor'))
+            velocidad = _int_wmi(m.get('ConfiguredClockSpeed')) or _int_wmi(m.get('Speed'))
+            capacidad = round(_int_wmi(m.get('Capacity')) / (1024 ** 3), 0) if m.get('Capacity') else 0
+            entrada = {
+                'ocupado': True,
+                'slot': nombre_slot,
+                'locator': locator,
+                'banco': banco or 'N/A',
+                'canal': canal,
+                'fabricante': _fabricante_ram(m.get('Manufacturer')),
+                'modelo': (m.get('PartNumber') or '').strip() or 'N/A',
+                'capacidad_gb': int(capacidad) if capacidad else 0,
+                'velocidad_mhz': velocidad,
+                'tecnologia': tecnologia,
+                'numero_serie': _serial_ram(m.get('SerialNumber')),
+            }
+            if form_factor:
+                entrada['form_factor'] = form_factor
+            pines = _pines_ram(tecnologia, form_factor)
+            if pines:
+                entrada['pines'] = pines
+            voltaje = _voltaje_ram_v(m.get('ConfiguredVoltage'))
+            if voltaje is not None:
+                entrada['voltaje_v'] = voltaje
+            ancho = _int_wmi(m.get('DataWidth'), 0)
+            if ancho:
+                entrada['ancho_datos'] = ancho
+            modulos.append(entrada)
+            if canal != 'N/A':
+                canales_ocupados.append(canal)
+
+        usados = set(canales_ocupados)
+        vacios = max(0, slots_totales - len(modulos))
+        for j in range(vacios):
+            indice = len(modulos) + 1
+            canal = _siguiente_canal_vacio(usados, slots_totales)
+            if canal != 'N/A':
+                usados.add(canal)
+            modulos.append(_entrada_slot_vacio(indice, canal))
+
+        canales_distintos = {c for c in canales_ocupados if c != 'N/A'}
+        placa = {
+            'slots_totales': slots_totales or len(modulos),
+            'slots_ocupados': len(raw_mods),
+            'canal_modo': 'dual' if len(canales_distintos) >= 2 else 'single',
+        }
+        max_gb = _kb_a_gb(max_kb)
+        if max_gb:
+            placa['max_capacidad_gb'] = int(max_gb)
     except Exception as e:
         print(f"⚠️ No se pudo obtener módulos RAM: {e}")
+    return modulos, placa
+
+
+def obtener_modulos_ram():
+    """Obtiene cada ranura RAM (ocupada o vacía) via CIM."""
+    modulos, _ = _obtener_ram_completa()
     return modulos
 
 
@@ -850,6 +1059,7 @@ def obtener_datos_pc(incluir_pesados=True):
         "nucleos_fisicos": cache['nucleos_fisicos'],
         "ram_total_gb": cache['ram_total_gb'],
         "modulos_ram": cache['modulos_ram'],
+        "ram_placa": cache.get('ram_placa') or {},
         "windows_version_detallada": cache.get('windows_version_detallada') or {},
         "tipo_equipo": cache['tipo_equipo'],
         

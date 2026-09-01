@@ -19,7 +19,7 @@ Agente de monitoreo IT para Windows. Se instala como servicio del sistema, recop
 - Hostname, sistema operativo y arquitectura
 - **Versión detallada de Windows** (`windows_version_detallada`: `display_version` como `23H2`, `build`, `ubr`, `edicion`, `build_lab`) leída del registro `HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion`
 - Modelo de procesador y cantidad de núcleos físicos
-- RAM total (GB) y módulos físicos (fabricante, modelo, capacidad, velocidad MHz)
+- RAM total (GB), módulos por ranura (`modulos_ram`: ocupado, slot, locator, canal, fabricante, modelo/PN, capacidad, velocidad, tecnología DDR, form factor, pines inferidos, voltaje, serial — vacío/`00000000` → `N/A`) y resumen de placa (`ram_placa`: slots totales/ocupados, `canal_modo` single/dual, `max_capacidad_gb`)
 - Modelos de discos físicos
 - **Tipo de equipo**: Detección basada en el tipo de chasis y presencia de batería (con corrección para Mini PCs que reportan erróneamente chasis de laptop).
 #### Datos dinámicos — cada 5 minutos
@@ -189,30 +189,10 @@ Aplicación **React + TypeScript + Vite** que lee la colección **`computadoras`
 
 ---
 
-## Módulo independiente de etiquetas QR (`etiquetas-qr`)
-
-Aplicación **React + TypeScript + Vite** para identificar físicamente las
-computadoras durante traslados. Un usuario autenticado genera e imprime un QR por
-PC. Cualquier persona puede escanearlo sin iniciar sesión y la ficha muestra
-exclusivamente **hostname** y **ubicación**.
-
-- Panel de generación: `/`
-- Ficha pública: `/e/{token}`
-- Colección privada: `etiquetas_qr_admin`
-- Colección pública mínima: `fichas_qr`
-
-El token es aleatorio y la ficha pública no contiene el UUID de la computadora,
-IPs, usuarios, software ni telemetría. Las reglas permiten obtener una ficha por
-token, pero no listar públicamente la colección. Instrucciones de desarrollo y
-despliegue: **`etiquetas-qr/README.md`**.
-
----
-
 ## Estructura del proyecto
 
 ```
 MiniAgente/
-├── etiquetas-qr/                # Módulo independiente de etiquetas físicas
 ├── MiniAgente-Front/            # Dashboard web (Vite + React); ver README dentro de la carpeta
 ├── main.py                      # Entry point, lógica del servicio Windows
 ├── verificar_actualizaciones.py # Lista version_agente y último comando por PC (Firebase)
