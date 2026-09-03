@@ -18,7 +18,8 @@ Agente de monitoreo IT para Windows. Se instala como servicio del sistema, recop
 #### Datos estáticos (una vez al inicio)
 - Hostname, sistema operativo y arquitectura
 - **Versión detallada de Windows** (`windows_version_detallada`: `display_version` como `23H2`, `build`, `ubr`, `edicion`, `build_lab`) leída del registro `HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion`
-- Modelo de procesador y cantidad de núcleos físicos
+- Modelo de procesador y cantidad de núcleos físicos (`procesador`, `nucleos_fisicos`)
+- **Procesador detallado** (`procesador_detallado`): nombre WMI completo, fabricante (`Intel` / `AMD`), gama (`i5`, `Ryzen 5`, etc.), modelo (`10400`, `5600G`), generación (entero o `null` si no se puede inferir), núcleos físicos/lógicos y frecuencia máxima en MHz. Fuente: `Win32_Processor` vía PowerShell; fallback registro `CentralProcessor\0` → `platform.processor()`. Parser en `src/core/procesador_parser.py`.
 - RAM total (GB), módulos por ranura (`modulos_ram`: ocupado, slot, locator, canal, fabricante, modelo/PN, capacidad, velocidad, tecnología DDR, form factor, pines inferidos, voltaje, serial — vacío/`00000000` → `N/A`) y resumen de placa (`ram_placa`: slots totales/ocupados, `canal_modo` single/dual, `max_capacidad_gb`)
 - Modelos de discos físicos
 - **Tipo de equipo**: Detección basada en el tipo de chasis y presencia de batería (con corrección para Mini PCs que reportan erróneamente chasis de laptop).
@@ -135,6 +136,24 @@ Para pruebas locales sin afectar la base de datos de producción:
 
 6. **Para producción**: Cambiar `USE_FIREBASE_EMULATOR = False` y `DEBUG_MODE = False` en `config/config.py`.
 
+#### Probar detección de procesador (local)
+
+Sin Firebase, podés verificar WMI y el parser:
+
+```powershell
+Set-Location C:\Users\Usr\Documents\Desarrollo\MiniAgente
+python scripts/test_cpu_local.py
+python scripts/test_cpu_local.py --sync
+```
+
+Tests unitarios del parser (Intel/AMD, generaciones):
+
+```powershell
+python -m unittest tests.test_procesador_parser -v
+```
+
+Tras desplegar, forzá sync con `ACTUALIZAR_DATOS` en `tareas/{uuid}` y comprobá en Firestore `computadoras/{uuid}` los campos `procesador` y `procesador_detallado`.
+
 **Nota:** El emulador usa datos locales y no persiste entre reinicios. Para producción, usa la BD real de Firebase.
 
 ```powershell
@@ -202,6 +221,7 @@ MiniAgente/
 ├── src/
 │   ├── core/
 │   │   ├── scanner.py           # Recopilación de datos de hardware/software
+│   │   ├── procesador_parser.py # Parser Intel/AMD: gama, modelo, generación
 │   │   ├── perifericos.py       # Detección de periféricos USB, monitores, audio
 │   │   ├── auto_update.py       # Mecanismo de auto-actualización
 │   │   ├── windows_updates.py   # Gestión de Windows Updates
@@ -209,6 +229,10 @@ MiniAgente/
 │   │   └── programas_instalados.py  # Listado de programas desde el registro (Uninstall keys)
 │   └── database/
 │       └── firebase_client.py   # Integración con Firestore, comandos remotos
+├── tests/
+│   └── test_procesador_parser.py  # Tests unitarios del parser de CPU
+├── scripts/
+│   └── test_cpu_local.py        # Prueba local WMI + payload de sync
 ├── auth/
 │   └── serviceAccountKey.json   # Credenciales de Firebase (no incluido en repo)
 ├── compilar.bat                 # Detiene el servicio (si existe), limpia build/dist, PyInstaller

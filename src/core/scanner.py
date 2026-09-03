@@ -40,6 +40,8 @@ try:
 except ImportError:
     PROGRAMAS_INSTALADOS_DISPONIBLE = False
 
+from src.core.procesador_parser import parsear_procesador
+
 # ==================== CACHÉ GLOBAL ====================
 _CACHE_ESTATICO = {}
 
@@ -125,16 +127,115 @@ def obtener_windows_version_detallada():
         return {}
 
 
+def _obtener_procesador_wmi():
+    """Consulta Win32_Processor vía PowerShell (mismo patrón que RAM)."""
+    try:
+        ps_script = r"""
+        $cpus = @(Get-CimInstance Win32_Processor -ErrorAction SilentlyContinue |
+            Select-Object Name, Manufacturer, NumberOfCores, NumberOfLogicalProcessors, MaxClockSpeed)
+        $cpus | ConvertTo-Json -Compress -Depth 3
+        """
+        resultado = subprocess.run(
+            ['powershell', '-NoProfile', '-Command', ps_script],
+            capture_output=True,
+            text=True,
+            encoding='utf-8', errors='replace',
+            timeout=10,
+            creationflags=subprocess.CREATE_NO_WINDOW
+        )
+        if resultado.returncode != 0 or not resultado.stdout.strip():
+            return None
+
+        datos = json.loads(resultado.stdout)
+        cpus = _listar_wmi(datos)
+        if not cpus:
+            return None
+        return cpus[0]
+    except Exception as e:
+        print(f"⚠️ No se pudo obtener procesador vía WMI: {e}")
+        return None
+
+
+def _obtener_procesador_registro():
+    """Fallback: nombre del procesador desde el registro de Windows."""
+    try:
+        ps_script = (
+            "(Get-ItemProperty 'HKLM:\\HARDWARE\\DESCRIPTION\\System\\CentralProcessor\\0' "
+            "-ErrorAction SilentlyContinue).ProcessorNameString"
+        )
+        resultado = subprocess.run(
+            ['powershell', '-NoProfile', '-Command', ps_script],
+            capture_output=True,
+            text=True,
+            encoding='utf-8', errors='replace',
+            timeout=10,
+            creationflags=subprocess.CREATE_NO_WINDOW
+        )
+        if resultado.returncode != 0:
+            return None
+        nombre = (resultado.stdout or '').strip()
+        return nombre or None
+    except Exception as e:
+        print(f"⚠️ No se pudo obtener procesador vía registro: {e}")
+        return None
+
+
+def _obtener_procesador_completo():
+    """Obtiene nombre y metadatos del CPU con cadena WMI → registro → platform."""
+    raw_wmi = _obtener_procesador_wmi()
+
+    nucleos_fisicos = psutil.cpu_count(logical=False) or 0
+    nucleos_logicos = psutil.cpu_count(logical=True) or 0
+    frecuencia_max_mhz = None
+    nombre = None
+
+    if raw_wmi:
+        nombre = (raw_wmi.get('Name') or '').strip()
+        nucleos_fisicos = _int_wmi(raw_wmi.get('NumberOfCores'), nucleos_fisicos)
+        nucleos_logicos = _int_wmi(raw_wmi.get('NumberOfLogicalProcessors'), nucleos_logicos)
+        frec = _int_wmi(raw_wmi.get('MaxClockSpeed'), 0)
+        if frec > 0:
+            frecuencia_max_mhz = frec
+
+    if not nombre:
+        nombre = _obtener_procesador_registro()
+
+    if not nombre:
+        nombre = (platform.processor() or '').strip()
+
+    parsed = parsear_procesador(nombre)
+    nombre_completo = nombre or 'Desconocido'
+
+    detallado = {
+        'nombre_completo': nombre_completo,
+        'fabricante': parsed['fabricante'],
+        'gama': parsed['gama'],
+        'modelo': parsed['modelo'],
+        'generacion': parsed['generacion'],
+        'nucleos_fisicos': nucleos_fisicos,
+        'nucleos_logicos': nucleos_logicos,
+        'frecuencia_max_mhz': frecuencia_max_mhz,
+    }
+
+    return {
+        'nombre_completo': nombre_completo,
+        'nucleos_fisicos': nucleos_fisicos,
+        'detallado': detallado,
+    }
+
+
 def inicializar_cache():
     """Cachea datos que nunca cambian (se llama 1 vez al inicio)"""
     global _CACHE_ESTATICO
     if not _CACHE_ESTATICO:
+        info_cpu = _obtener_procesador_completo()
         _CACHE_ESTATICO = {
             'hostname': obtener_hostname(),
             'sistema_operativo': _detectar_windows(),
             'arquitectura': platform.machine(),
-            'procesador': platform.processor(),
-            'nucleos_fisicos': psutil.cpu_count(logical=False),
+            'procesador': info_cpu['nombre_completo'],
+            'nucleos_fisicos': info_cpu['nucleos_fisicos'],
+            'procesador_detallado': info_cpu['detallado'],
             'ram_total_gb': round(psutil.virtual_memory().total / (1024 ** 3), 2),
             'info_discos': obtener_info_discos_fisicos(),      # modelo + tipo por DeviceId
             'mapa_particiones': obtener_mapa_particiones(),    # letra → número disco
@@ -1057,6 +1158,7 @@ def obtener_datos_pc(incluir_pesados=True):
         "arquitectura": cache['arquitectura'],
         "procesador": cache['procesador'],
         "nucleos_fisicos": cache['nucleos_fisicos'],
+        "procesador_detallado": cache.get('procesador_detallado') or {},
         "ram_total_gb": cache['ram_total_gb'],
         "modulos_ram": cache['modulos_ram'],
         "ram_placa": cache.get('ram_placa') or {},
