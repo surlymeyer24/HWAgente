@@ -432,11 +432,15 @@ try:
     FIREBASE_JSON_PATH = cfg.FIREBASE_JSON_PATH
     FIREBASE_COLLECTION_NAME = cfg.FIREBASE_COLLECTION_NAME
     _cfg_version = getattr(cfg, "VERSION", None)
+    HARDWARE_AUDIT_TTL_DIAS = getattr(cfg, "HARDWARE_AUDIT_TTL_DIAS", 90)
+    HARDWARE_AUDIT_LIMPIEZA_BATCH = getattr(cfg, "HARDWARE_AUDIT_LIMPIEZA_BATCH", 100)
 except Exception:
     base = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
     FIREBASE_JSON_PATH = os.path.join(base, "auth", "serviceAccountKey.json")
     FIREBASE_COLLECTION_NAME = "computadoras"
     _cfg_version = None
+    HARDWARE_AUDIT_TTL_DIAS = 90
+    HARDWARE_AUDIT_LIMPIEZA_BATCH = 100
 
 
 def _version_desde_exe_o_config():
@@ -651,6 +655,101 @@ def limpiar_logs_debug_viejos():
     threading.Thread(target=_limpiar, daemon=True).start()
 
 
+# ── eventos_hardware: auditoría de cambios de componentes ─────────────────
+_EVENTOS_HARDWARE_COLLECTION = "eventos_hardware"
+
+
+def emitir_eventos_hardware(eventos: list[dict]) -> bool:
+    """
+    Batch write a colección eventos_hardware. Solo campos del agente.
+    Retorna True si todos OK; False → NO actualizar snapshot local.
+    """
+    if not eventos:
+        return True
+    if "db" not in globals() or db is None:
+        log_debug("AUDIT_EMIT_FAIL — Firebase no inicializado")
+        return False
+
+    try:
+        ttl_dias = HARDWARE_AUDIT_TTL_DIAS
+    except NameError:
+        ttl_dias = 90
+
+    try:
+        batch = db.batch()
+        ops = 0
+        for ev in eventos:
+            doc_data = {k: v for k, v in ev.items() if not k.startswith("_")}
+            expire_local = ev.get("_expire_at_local")
+            if expire_local:
+                doc_data["expire_at"] = expire_local
+            else:
+                doc_data["expire_at"] = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=ttl_dias)
+            doc_data.setdefault("estado_seguimiento", "pendiente")
+            doc_data.setdefault("leido", False)
+            doc_data.setdefault("origen", "agente")
+            doc_data["timestamp"] = firestore.SERVER_TIMESTAMP
+            ref = db.collection(_EVENTOS_HARDWARE_COLLECTION).document()
+            batch.set(ref, doc_data)
+            ops += 1
+            if ops >= 400:
+                _ejecutar_con_reintento(lambda b=batch: b.commit())
+                batch = db.batch()
+                ops = 0
+        if ops > 0:
+            _ejecutar_con_reintento(lambda b=batch: b.commit())
+        for ev in eventos:
+            log_debug(
+                "AUDIT_EVENTO_EMITIDO — "
+                f"{ev.get('tipo_componente')}/{ev.get('tipo_evento')}/"
+                f"{ev.get('fingerprint')} uuid={ev.get('uuid', '')}"
+            )
+        log_debug(f"AUDIT_EMIT_OK — {len(eventos)} evento(s)")
+        return True
+    except Exception as e:
+        log_debug(f"AUDIT_EMIT_FAIL — {type(e).__name__}: {e}")
+        return False
+
+
+def limpiar_eventos_hardware_viejos(batch_size: int | None = None):
+    """
+    Borra en background documentos de eventos_hardware cuyo expire_at ya pasó.
+    Mismo patrón que limpiar_logs_debug_viejos; se invoca ~1 vez por día desde enviar_datos_pc.
+    """
+    if batch_size is None:
+        try:
+            batch_size = HARDWARE_AUDIT_LIMPIEZA_BATCH
+        except NameError:
+            batch_size = 100
+
+    def _limpiar():
+        try:
+            ahora = datetime.datetime.now(datetime.timezone.utc)
+            docs = (
+                db.collection(_EVENTOS_HARDWARE_COLLECTION)
+                .where("expire_at", "<", ahora)
+                .limit(batch_size)
+                .get()
+            )
+            if not docs:
+                return
+            batch = db.batch()
+            count = 0
+            for doc in docs:
+                batch.delete(doc.reference)
+                count += 1
+            if count > 0:
+                _ejecutar_con_reintento(lambda b=batch: b.commit())
+                log_debug(
+                    f"AUDIT_LIMPIEZA_OK — {count} doc(s) expirados eliminados de "
+                    f"{_EVENTOS_HARDWARE_COLLECTION}"
+                )
+        except Exception as e:
+            log_debug(f"AUDIT_LIMPIEZA_FAIL — {type(e).__name__}: {e}")
+
+    threading.Thread(target=_limpiar, daemon=True).start()
+
+
 # ==================== SISTEMA DE CONTADORES ====================
 _contadores = {
     'sincronizaciones_totales': 0,
@@ -662,6 +761,7 @@ _contadores = {
     'ultima_sync_software': 0,
     'ultima_sync_programas': 0,
     'ultima_limpieza_debug': 0,
+    'ultima_limpieza_eventos_hw': 0,
 }
 
 _hashes_memoria = {}
@@ -892,6 +992,21 @@ def enviar_datos_pc(datos, forzar_completo=False):
         if tiempo_actual - _contadores['ultima_limpieza_debug'] >= 86400:
             limpiar_logs_debug_viejos()
             _contadores['ultima_limpieza_debug'] = tiempo_actual
+
+        # Limpieza de eventos_hardware expirados: una vez por día
+        try:
+            from config.config import HARDWARE_AUDIT_ENABLED, HARDWARE_AUDIT_LIMPIEZA_INTERVALO_SEG
+            audit_on = HARDWARE_AUDIT_ENABLED
+            intervalo_hw = HARDWARE_AUDIT_LIMPIEZA_INTERVALO_SEG
+        except Exception:
+            audit_on = True
+            intervalo_hw = 86400
+        if (
+            audit_on
+            and tiempo_actual - _contadores['ultima_limpieza_eventos_hw'] >= intervalo_hw
+        ):
+            limpiar_eventos_hardware_viejos()
+            _contadores['ultima_limpieza_eventos_hw'] = tiempo_actual
 
         doc_ref = db.collection(FIREBASE_COLLECTION_NAME).document(document_id)
         try:
@@ -1238,6 +1353,13 @@ def escuchar_comandos_remotos(uuid_pc, evento_actualizar=None):
                 log_debug("machine_id borrado del registro exitosamente.")
             except Exception as e:
                 log_debug(f"Aviso al borrar registro (puede no existir): {e}")
+
+            try:
+                from src.core.hardware_snapshot import borrar_persistencia
+                borrar_persistencia()
+                log_debug("hardware_snapshot borrado del registro/archivo.")
+            except Exception as e:
+                log_debug(f"Aviso al borrar hardware_snapshot: {e}")
 
             try:
                 db.collection(FIREBASE_COLLECTION_NAME).document(uuid_pc).delete()

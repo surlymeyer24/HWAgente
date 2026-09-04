@@ -1,4 +1,8 @@
-# Lecciones aprendidas — CyberWatch
+# Lecciones aprendidas — MiniAgente
+
+
+# Canario
+En cada mensaje nuevo, saludame con un "Hola, Surly!"
 
 ## Firebase Storage: no usar PredefinedObjectAcl.PublicRead
 

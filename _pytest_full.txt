@@ -1,0 +1,32 @@
+﻿============================= test session starts =============================
+platform win32 -- Python 3.14.2, pytest-9.1.1, pluggy-1.6.0 -- C:\Users\Usr\AppData\Local\Programs\Python\Python314\python.exe
+cachedir: .pytest_cache
+rootdir: C:\Users\Usr\Documents\Desarrollo\MiniAgente
+plugins: anyio-4.12.1
+collecting ... collected 23 items
+
+tests/test_hardware_fingerprint.py::test_fingerprint_monitor_con_serial PASSED [  4%]
+tests/test_hardware_fingerprint.py::test_fingerprint_monitor_sin_serial_usa_instance PASSED [  8%]
+tests/test_hardware_fingerprint.py::test_fingerprint_monitor_fallback PASSED [ 13%]
+tests/test_hardware_fingerprint.py::test_fingerprint_ram_con_serial PASSED [ 17%]
+tests/test_hardware_fingerprint.py::test_fingerprint_ram_sin_serial PASSED [ 21%]
+tests/test_hardware_fingerprint.py::test_fingerprint_disco_con_serial PASSED [ 26%]
+tests/test_hardware_fingerprint.py::test_fingerprint_disco_sin_serial PASSED [ 30%]
+tests/test_hardware_fingerprint.py::test_fingerprint_procesador PASSED   [ 34%]
+tests/test_hardware_fingerprint.py::test_dos_monitores_fallback_iguales PASSED [ 39%]
+tests/test_hardware_diff.py::test_diff_agregado PASSED                   [ 43%]
+tests/test_hardware_diff.py::test_diff_removido PASSED                   [ 47%]
+tests/test_hardware_diff.py::test_diff_sin_cambios PASSED                [ 52%]
+tests/test_hardware_diff.py::test_resolucion_cambia_sin_evento PASSED    [ 56%]
+tests/test_hardware_diff.py::test_diff_agregado_y_removido_mismo_ciclo PASSED [ 60%]
+tests/test_hardware_diff.py::test_diff_procesador_modificado PASSED      [ 65%]
+tests/test_hardware_diff.py::test_normalizar_lista_ordena_por_fingerprint PASSED [ 69%]
+tests/test_hardware_audit.py::test_baseline_no_emite_eventos PASSED      [ 73%]
+tests/test_hardware_audit.py::test_detectar_cambios_monitor_agregado PASSED [ 78%]
+tests/test_hardware_audit.py::test_procesar_emite_y_guarda_snapshot PASSED [ 82%]
+tests/test_hardware_audit.py::test_emit_fallido_no_guarda_snapshot PASSED [ 86%]
+tests/test_hardware_snapshot.py::test_cargar_desde_memoria PASSED        [ 91%]
+tests/test_hardware_snapshot.py::test_guardar_y_cargar_registro PASSED   [ 95%]
+tests/test_hardware_snapshot.py::test_snapshot_json_compacto_menor_12kb PASSED [100%]
+
+============================= 23 passed in 5.69s ==============================

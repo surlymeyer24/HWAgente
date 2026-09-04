@@ -133,6 +133,11 @@ if RUNNING_AS_SERVICE:
                     flush_logs_arranque,
                 )
                 from src.core.scanner import obtener_datos_pc
+                from src.core.hardware_audit import (
+                    procesar_auditoria_hardware,
+                    procesar_auditoria_procesador,
+                    SECCIONES_CICLO,
+                )
                 log_arranque("SVCRUN_FIREBASE_OK — módulos cargados")
 
                 # AVISAR QUE YA ESTÁ CORRIENDO
@@ -156,6 +161,38 @@ if RUNNING_AS_SERVICE:
                 log_arranque(f"SVCRUN_SYNC_INICIAL — uuid: {uuid_final}")
                 flush_logs_arranque(uuid_final, datos.get("hostname", ""), _cola_logs_arranque)
                 enviar_datos_pc(datos)
+                hostname = datos.get("hostname", "")
+                # Baseline / diff auditoría hardware (monitores, RAM, discos)
+                try:
+                    cambios_audit = procesar_auditoria_hardware(
+                        datos,
+                        uuid_final,
+                        hostname,
+                        secciones=SECCIONES_CICLO,
+                        version_agente=VERSION_AGENTE or "?",
+                    )
+                    if cambios_audit:
+                        log_debug(
+                            f"AUDIT_ARRANQUE — {len(cambios_audit)} cambio(s): "
+                            + ", ".join(f"{c.tipo_componente}/{c.tipo_evento}" for c in cambios_audit)
+                        )
+                except Exception as e_audit:
+                    log_debug(f"AUDIT_ARRANQUE error: {e_audit}")
+                # CPU: diff solo al arranque (cambio físico → reinicio del servicio/PC)
+                try:
+                    cambios_cpu = procesar_auditoria_procesador(
+                        datos,
+                        uuid_final,
+                        hostname,
+                        version_agente=VERSION_AGENTE or "?",
+                    )
+                    if cambios_cpu:
+                        log_debug(
+                            f"AUDIT_CPU_ARRANQUE — {len(cambios_cpu)} cambio(s): "
+                            + ", ".join(f"{c.tipo_evento}/{c.fingerprint}" for c in cambios_cpu)
+                        )
+                except Exception as e_cpu:
+                    log_debug(f"AUDIT_CPU_ARRANQUE error: {e_cpu}")
                 # Evento para despertar el bucle cuando Firebase envíe ACTUALIZAR_AGENTE
                 try:
                     import win32event as wevt
@@ -279,6 +316,24 @@ if RUNNING_AS_SERVICE:
                     datos_ciclo = obtener_datos_pc()
                     datos_ciclo["uuid"] = uuid_final
                     enviar_datos_pc(datos_ciclo)
+                    try:
+                        cambios_ciclo = procesar_auditoria_hardware(
+                            datos_ciclo,
+                            uuid_final,
+                            datos_ciclo.get("hostname", ""),
+                            secciones=SECCIONES_CICLO,
+                            version_agente=VERSION_AGENTE or "?",
+                        )
+                        if cambios_ciclo:
+                            log_debug(
+                                f"AUDIT_CICLO — {len(cambios_ciclo)} cambio(s): "
+                                + ", ".join(
+                                    f"{c.tipo_componente}/{c.tipo_evento}/{c.fingerprint}"
+                                    for c in cambios_ciclo
+                                )
+                            )
+                    except Exception as e_audit:
+                        log_debug(f"AUDIT_CICLO error: {e_audit}")
                     
             except Exception as e:
                 log_arranque(f"SVCRUN_ERROR — {type(e).__name__}: {e}")

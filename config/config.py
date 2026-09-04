@@ -13,8 +13,16 @@ BASE_DIR = get_base_path()
 # Rutas absolutas garantizadas
 FIREBASE_JSON_PATH = os.path.join(BASE_DIR, "auth", "serviceAccountKey.json")
 FIREBASE_COLLECTION_NAME = "computadoras"
-VERSION = "5.5.0"
+VERSION = "5.9.0"
 DEBUG_MODE = False
+
+# ---------------------------------------------------------------------------
+# AUDITORÍA DE HARDWARE — detectar cambios no autorizados en componentes
+# ---------------------------------------------------------------------------
+HARDWARE_AUDIT_ENABLED = True
+HARDWARE_AUDIT_TTL_DIAS = 90
+HARDWARE_AUDIT_LIMPIEZA_BATCH = 100
+HARDWARE_AUDIT_LIMPIEZA_INTERVALO_SEG = 86400  # 1 vez por día, junto a limpiar_logs_debug
 
 # ---------------------------------------------------------------------------
 # SEGURIDAD — Módulo de actualización remota

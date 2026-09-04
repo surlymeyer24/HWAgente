@@ -224,6 +224,71 @@ def _obtener_procesador_completo():
     }
 
 
+_VALORES_PLACA_GENERICOS = frozenset({
+    '', 'unknown', 'not specified', 'not available', 'default string',
+    'to be filled by o.e.m.', 'system manufacturer', 'system product name',
+    'base board', 'baseboard',
+})
+
+
+def _texto_placa_base(raw):
+    texto = (raw or '').strip()
+    if not texto or texto.lower() in _VALORES_PLACA_GENERICOS:
+        return None
+    return texto
+
+
+def _serial_placa_base(raw):
+    serial = (raw or '').strip()
+    if not serial or set(serial) <= {'0', '-', ' '} or serial.lower() in _VALORES_PLACA_GENERICOS:
+        return None
+    return serial
+
+
+def _obtener_placa_base():
+    """Placa base (motherboard) vía Win32_BaseBoard."""
+    try:
+        ps_script = r"""
+        Get-CimInstance Win32_BaseBoard -ErrorAction SilentlyContinue |
+            Select-Object Manufacturer, Product, Version, SerialNumber |
+            ConvertTo-Json -Compress -Depth 3
+        """
+        resultado = subprocess.run(
+            ['powershell', '-NoProfile', '-Command', ps_script],
+            capture_output=True,
+            text=True,
+            encoding='utf-8', errors='replace',
+            timeout=10,
+            creationflags=subprocess.CREATE_NO_WINDOW
+        )
+        if resultado.returncode != 0 or not resultado.stdout.strip():
+            return {}
+
+        datos = json.loads(resultado.stdout)
+        if isinstance(datos, list):
+            datos = datos[0] if datos else {}
+        if not isinstance(datos, dict):
+            return {}
+
+        placa = {}
+        fabricante = _texto_placa_base(datos.get('Manufacturer'))
+        modelo = _texto_placa_base(datos.get('Product'))
+        version = _texto_placa_base(datos.get('Version'))
+        serial = _serial_placa_base(datos.get('SerialNumber'))
+        if fabricante:
+            placa['fabricante'] = fabricante
+        if modelo:
+            placa['modelo'] = modelo
+        if version:
+            placa['version'] = version
+        if serial:
+            placa['numero_serie'] = serial
+        return placa
+    except Exception as e:
+        print(f"⚠️ No se pudo obtener placa base: {e}")
+        return {}
+
+
 def inicializar_cache():
     """Cachea datos que nunca cambian (se llama 1 vez al inicio)"""
     global _CACHE_ESTATICO
@@ -243,6 +308,7 @@ def inicializar_cache():
             'ram_placa': {},
             'windows_version_detallada': obtener_windows_version_detallada(),
             'tipo_equipo': obtener_tipo_equipo(),
+            'placa_base': _obtener_placa_base(),
         }
         modulos_ram, ram_placa = _obtener_ram_completa()
         _CACHE_ESTATICO['modulos_ram'] = modulos_ram
@@ -495,13 +561,105 @@ def obtener_modulos_ram():
     return modulos
 
 
+def obtener_discos_fisicos_auditoria() -> list[dict]:
+    """Lista de discos físicos para auditoría [{device_id, modelo, tipo, numero_serie?}]."""
+    cache = inicializar_cache()
+    info_discos = cache.get("info_discos") or {}
+    discos = []
+    for device_id, info in info_discos.items():
+        discos.append({
+            "device_id": str(device_id),
+            "modelo": info.get("modelo") or "Desconocido",
+            "tipo": info.get("tipo") or "Desconocido",
+            "numero_serie": info.get("numero_serie") or "",
+        })
+    return discos
+
+
+def obtener_secciones_auditoria(datos_pc: dict) -> dict:
+    """Extrae y normaliza monitores, ram, discos y procesador para hardware_audit."""
+    cache = inicializar_cache()
+
+    perifericos = datos_pc.get("perifericos") or {}
+    monitores = []
+    for m in perifericos.get("monitores") or []:
+        if m.get("error"):
+            continue
+        monitores.append({
+            "nombre": m.get("nombre") or "Desconocido",
+            "numero_serie": m.get("numero_serie") or "",
+            "fabricante": m.get("fabricante") or "",
+            "pulgadas": m.get("pulgadas") or 0,
+            "instance_name": m.get("instance_name") or "",
+        })
+
+    modulos_ram = datos_pc.get("modulos_ram") or cache.get("modulos_ram") or []
+    ram_ocupada = []
+    for mod in modulos_ram:
+        if not mod.get("ocupado"):
+            continue
+        ram_ocupada.append({
+            "slot": mod.get("slot") or "N/A",
+            "locator": mod.get("locator") or mod.get("slot") or "N/A",
+            "numero_serie": mod.get("numero_serie") or "N/A",
+            "capacidad_gb": mod.get("capacidad_gb") or 0,
+            "modelo": mod.get("modelo") or "N/A",
+        })
+
+    proc = datos_pc.get("procesador_detallado") or cache.get("procesador_detallado") or {}
+    procesador = {}
+    if proc:
+        procesador = {
+            "nombre_completo": proc.get("nombre_completo") or datos_pc.get("procesador") or "Desconocido",
+            "nucleos_fisicos": proc.get("nucleos_fisicos") or datos_pc.get("nucleos_fisicos") or 0,
+            "gama": proc.get("gama") or "",
+            "modelo": proc.get("modelo") or "",
+        }
+
+    return {
+        "monitores": monitores,
+        "ram": ram_ocupada,
+        "discos": obtener_discos_fisicos_auditoria(),
+        "procesador": procesador,
+    }
+
+
+def _serial_disco_fisico(raw) -> str:
+    serial = (raw or '').strip()
+    if not serial or set(serial) <= {'0'}:
+        return ''
+    return serial
+
+
+def _tipo_disco_fisico(media_type) -> str:
+    if media_type is None:
+        return 'Desconocido'
+    mt_str = str(media_type).strip()
+    if mt_str in ('SSD', 'HDD'):
+        return mt_str
+    try:
+        n = int(media_type)
+        if n in (3, 4):
+            return 'SSD'
+        if n in (0, 1, 2):
+            return 'HDD'
+    except (TypeError, ValueError):
+        pass
+    mt_upper = mt_str.upper()
+    if 'SSD' in mt_upper:
+        return 'SSD'
+    if 'HDD' in mt_upper:
+        return 'HDD'
+    return 'Desconocido'
+
+
 def obtener_info_discos_fisicos():
-    """Modelos y tipos de discos físicos via Get-PhysicalDisk (funciona en Win10/11 sin wmic)."""
+    """Modelos, tipos y serial de discos físicos via Get-PhysicalDisk."""
     info = {}
     try:
         resultado = subprocess.run(
             ['powershell', '-NoProfile', '-Command',
-             'Get-PhysicalDisk | Select-Object DeviceId, FriendlyName, MediaType | ConvertTo-Json'],
+             'Get-PhysicalDisk | Select-Object DeviceId, FriendlyName, MediaType, SerialNumber | ConvertTo-Json'],
             capture_output=True,
             text=True,
             encoding='utf-8', errors='replace',
@@ -514,10 +672,14 @@ def obtener_info_discos_fisicos():
                 data = [data]
             for disco in data:
                 device_id = str(disco.get('DeviceId', '')).strip()
-                media_type = str(disco.get('MediaType', '')).strip()
+                media_type = disco.get('MediaType')
                 modelo = (disco.get('FriendlyName') or '').strip() or 'Desconocido'
-                tipo = media_type if media_type in ('SSD', 'HDD') else 'Desconocido'
-                info[device_id] = {'modelo': modelo, 'tipo': tipo}
+                tipo = _tipo_disco_fisico(media_type)
+                entrada = {'modelo': modelo, 'tipo': tipo}
+                serial = _serial_disco_fisico(disco.get('SerialNumber'))
+                if serial:
+                    entrada['numero_serie'] = serial
+                info[device_id] = entrada
     except Exception as e:
         print(f"⚠️ No se pudo obtener info de discos físicos: {e}")
     return info
@@ -1164,7 +1326,8 @@ def obtener_datos_pc(incluir_pesados=True):
         "ram_placa": cache.get('ram_placa') or {},
         "windows_version_detallada": cache.get('windows_version_detallada') or {},
         "tipo_equipo": cache['tipo_equipo'],
-        
+        "placa_base": cache.get('placa_base') or {},
+
         # Datos dinámicos ligeros
         "cpu_uso_porcentaje": psutil.cpu_percent(interval=0.5),  # REDUCIDO DE 1 A 0.5
         "ram_uso_porcentaje": psutil.virtual_memory().percent,

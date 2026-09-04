@@ -64,6 +64,7 @@ def obtener_monitores():
                 Nombre = $nameStr
                 NumeroSerie = $serialStr
                 Fabricante = $mfrStr
+                InstanceName = $id
                 AnchoMM = $monitor.MaxHorizontalImageSize
                 AltoMM = $monitor.MaxVerticalImageSize
                 AnchoCM = [math]::Round($monitor.MaxHorizontalImageSize / 10, 1)
@@ -104,6 +105,7 @@ def obtener_monitores():
                 fabricante = (monitor.get('Fabricante') or '').strip()
                 if fabricante:
                     entry['fabricante'] = fabricante
+                entry['instance_name'] = (monitor.get('InstanceName') or '').strip()
                 monitores.append(entry)
         
         # Obtener resoluciones actuales

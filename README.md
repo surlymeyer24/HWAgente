@@ -45,7 +45,7 @@ Agente de monitoreo IT para Windows. Se instala como servicio del sistema, recop
 
 ### Detección de periféricos
 
-- **Monitores**: nombre, resolución, tamaño físico en cm y pulgadas, número de serie y fabricante (vía EDID/WmiMonitorID)
+- **Monitores**: nombre, resolución, tamaño físico en cm y pulgadas, número de serie, fabricante e **`instance_name`** WMI (vía EDID/WmiMonitorID)
 - **Teclado y mouse**: detectados desde dispositivos USB HID, con marca si está disponible; campo `conexion` en Firestore (`usb`, `inalambrico_usb`, `bluetooth`) cuando se puede inferir (nombre del dongle, **PID USB de receptores Logitech** alineado con Solaar/Unifying-Bolt-Lightspeed, o Bluetooth); también se persisten `vid` y `pid` (hex, p. ej. `046D` / `C52B`) cuando el InstanceId PnP los expone y hay un único dispositivo de ese tipo
 - **Otros USB**: almacenamiento, cámaras, adaptadores Bluetooth, impresoras USB, etc.
 - **Audio**: dispositivos de salida (parlantes, auriculares)
@@ -65,7 +65,43 @@ Los comandos se envían desde el frontend escribiendo en el documento `tareas/{u
 | `ACTUALIZAR_DATOS` | Fuerza una sync completa inmediata |
 | `INSTALAR_UPDATES` | Instala todas las actualizaciones de Windows pendientes |
 | `ACTUALIZAR_AGENTE` | Descarga y reemplaza el `.exe` desde la URL configurada en Firestore |
-| `RESETEAR_ID` | Borra la caché local del UUID en el Registro y reinicia el servicio para forzar un nuevo ID limpio |
+| `RESETEAR_ID` | Borra machine_id y **hardware_snapshot** del registro; reinicia servicio |
+
+### Auditoría de hardware (v5.6+)
+
+Detecta cambios no autorizados en componentes de PC y los reporta a Firestore (`eventos_hardware`).
+
+| Aspecto | Detalle |
+|---------|---------|
+| **Estado actual (v5.9)** | Monitores, RAM, discos, procesador + limpieza TTL |
+| **Componentes** | `monitor`, `ram`, `disco`, `procesador` (`tipo_componente` en eventos) |
+| **Latencia** | ~5 min (ciclo del servicio) |
+| **Comparación** | 100% local: snapshot en `HKLM\SOFTWARE\AgenteBacar\hardware_snapshot` vs escaneo WMI |
+| **Primer arranque** | Baseline silencioso (0 eventos) |
+| **Feature flag** | `HARDWARE_AUDIT_ENABLED` en `config/config.py` |
+| **TTL eventos** | `expire_at` = +90 días |
+
+Flujo: escaneo → diff local → evento en `eventos_hardware` → IT gestiona en inventario.
+
+Prueba local sin Firebase:
+
+```powershell
+python scripts/test_hardware_audit_local.py --simular-monitor-agregado
+python scripts/test_hardware_audit_local.py --desde-pc
+```
+
+Logs en `C:\agente_debug.txt`:
+
+| Log | Significado |
+|-----|-------------|
+| `AUDIT_BASELINE` | Snapshot inicial guardado |
+| `AUDIT_EVENTO_EMITIDO` | Evento enviado a Firestore |
+| `AUDIT_EMIT_OK` / `AUDIT_EMIT_FAIL` | Resultado batch Firestore |
+| `AUDIT_SNAPSHOT_SAVED` / `AUDIT_SNAPSHOT_FAIL` | Persistencia local |
+| `AUDIT_LIMPIEZA_OK` | Purga docs con `expire_at` vencido (~1× día) |
+| `AUDIT_CICLO` / `AUDIT_CPU_ARRANQUE` | Resumen por ciclo o arranque |
+
+Guía de piloto (5–10 PCs): `docs/PILOTO_AUDITORIA_HARDWARE.md`
 
 ### Auto-actualización
 

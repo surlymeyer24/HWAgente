@@ -1,0 +1,44 @@
+﻿Python 3.14.2
+============================= test session starts =============================
+platform win32 -- Python 3.14.2, pytest-9.1.1, pluggy-1.6.0 -- C:\Users\Usr\AppData\Local\Programs\Python\Python314\python.exe
+cachedir: .pytest_cache
+rootdir: C:\Users\Usr\Documents\Desarrollo\MiniAgente
+plugins: anyio-4.12.1
+collecting ... collected 33 items
+
+tests/test_hardware_fingerprint.py::test_fingerprint_monitor_con_serial PASSED [  3%]
+tests/test_hardware_fingerprint.py::test_fingerprint_monitor_sin_serial_usa_instance PASSED [  6%]
+tests/test_hardware_fingerprint.py::test_fingerprint_monitor_fallback PASSED [  9%]
+tests/test_hardware_fingerprint.py::test_fingerprint_ram_con_serial PASSED [ 12%]
+tests/test_hardware_fingerprint.py::test_fingerprint_ram_sin_serial PASSED [ 15%]
+tests/test_hardware_fingerprint.py::test_fingerprint_disco_con_serial PASSED [ 18%]
+tests/test_hardware_fingerprint.py::test_fingerprint_disco_sin_serial PASSED [ 21%]
+tests/test_hardware_fingerprint.py::test_fingerprint_procesador PASSED   [ 24%]
+tests/test_hardware_fingerprint.py::test_dos_monitores_fallback_iguales PASSED [ 27%]
+tests/test_hardware_diff.py::test_diff_agregado PASSED                   [ 30%]
+tests/test_hardware_diff.py::test_diff_removido PASSED                   [ 33%]
+tests/test_hardware_diff.py::test_diff_sin_cambios PASSED                [ 36%]
+tests/test_hardware_diff.py::test_resolucion_cambia_sin_evento PASSED    [ 39%]
+tests/test_hardware_diff.py::test_diff_agregado_y_removido_mismo_ciclo PASSED [ 42%]
+tests/test_hardware_diff.py::test_diff_procesador_modificado PASSED      [ 45%]
+tests/test_hardware_diff.py::test_normalizar_lista_ordena_por_fingerprint PASSED [ 48%]
+tests/test_hardware_audit.py::test_baseline_no_emite_eventos PASSED      [ 51%]
+tests/test_hardware_audit.py::test_detectar_cambios_monitor_agregado PASSED [ 54%]
+tests/test_hardware_audit.py::test_procesar_emite_y_guarda_snapshot PASSED [ 57%]
+tests/test_hardware_audit.py::test_emit_fallido_no_guarda_snapshot PASSED [ 60%]
+tests/test_hardware_audit.py::test_seccion_nueva_baseline_sin_eventos PASSED [ 63%]
+tests/test_hardware_snapshot.py::test_cargar_desde_memoria PASSED        [ 66%]
+tests/test_hardware_snapshot.py::test_guardar_y_cargar_registro PASSED   [ 69%]
+tests/test_hardware_snapshot.py::test_snapshot_json_compacto_menor_12kb PASSED [ 72%]
+tests/test_monitor_detector.py::test_monitor_conectado PASSED            [ 75%]
+tests/test_monitor_detector.py::test_monitor_desconectado PASSED         [ 78%]
+tests/test_monitor_detector.py::test_instance_name_en_fingerprint PASSED [ 81%]
+tests/test_ram_detector.py::test_ram_modulo_agregado PASSED              [ 84%]
+tests/test_ram_detector.py::test_ram_modulo_removido PASSED              [ 87%]
+tests/test_ram_detector.py::test_ram_cambio_capacidad_misma_ranura PASSED [ 90%]
+tests/test_disco_detector.py::test_disco_agregado PASSED                 [ 93%]
+tests/test_disco_detector.py::test_disco_removido PASSED                 [ 96%]
+tests/test_disco_detector.py::test_disco_por_serial PASSED               [100%]
+
+============================= 33 passed in 6.66s ==============================
+EXIT:0
