@@ -40,6 +40,12 @@ try:
 except ImportError:
     PROGRAMAS_INSTALADOS_DISPONIBLE = False
 
+try:
+    from src.core.session_tracker import obtener_datos_sesion
+    SESSION_TRACKER_DISPONIBLE = True
+except ImportError:
+    SESSION_TRACKER_DISPONIBLE = False
+
 from src.core.procesador_parser import parsear_procesador
 
 # ==================== CACHÉ GLOBAL ====================
@@ -1334,8 +1340,14 @@ def obtener_datos_pc(incluir_pesados=True):
         "usuarios": obtener_usuarios(),
         "discos": obtener_salud_discos(),
         "red": obtener_info_red(),
-        "servicios_criticos": obtener_estado_servicios()
+        "servicios_criticos": obtener_estado_servicios(),
     }
+
+    if SESSION_TRACKER_DISPONIBLE:
+        try:
+            datos.update(obtener_datos_sesion())
+        except Exception:
+            pass
     
     # Datos pesados (CONDICIONAL)
     if incluir_pesados:

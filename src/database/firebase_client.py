@@ -955,7 +955,11 @@ def enviar_datos_pc(datos, forzar_completo=False):
             "version_agente": VERSION_AGENTE or "?",
             "estado_conexion": "ONLINE",
         }
-        
+
+        for campo_sesion in ("sesion_estado", "sesion_bloqueo_auto_min", "sesion_resumen_hoy"):
+            if campo_sesion in datos:
+                actualizacion[campo_sesion] = datos[campo_sesion]
+
         # Aplicaciones cada 15 min (900 seg)
         if tiempo_actual - _contadores['ultima_sync_apps'] >= 900:
             if "aplicaciones_activas" in datos:

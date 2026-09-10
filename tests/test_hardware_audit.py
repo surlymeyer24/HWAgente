@@ -44,26 +44,33 @@ def test_detectar_cambios_monitor_agregado():
         {"nombre": "Samsung", "numero_serie": "NEW", "fabricante": "Samsung", "pulgadas": 27},
     ])
     snap_act = construir_snapshot_actual(datos_nuevos, ("monitores",))
-    cambios = detectar_cambios(snap_ant, snap_act, ("monitores",))
+    cambios, _mon = detectar_cambios(snap_ant, snap_act, ("monitores",))
     assert any(c.tipo_evento == "agregado" for c in cambios)
 
 
 def test_procesar_emite_y_guarda_snapshot():
     snap_ant = construir_snapshot_actual(_datos_pc_base(), ("monitores",))
-    datos_nuevos = _datos_pc_base(monitores=[])
+    datos_nuevos = _datos_pc_base(monitores=[
+        {"nombre": "LG 24", "numero_serie": "ABC", "fabricante": "LG", "pulgadas": 24},
+        {"nombre": "Samsung", "numero_serie": "NEW", "fabricante": "Samsung", "pulgadas": 27},
+    ])
 
     with patch("src.core.hardware_snapshot.cargar", return_value=snap_ant), \
          patch("src.core.hardware_snapshot.guardar", return_value=True) as mock_guardar, \
          patch("src.core.hardware_audit._emitir_si_hay", return_value=True) as mock_emit:
         cambios = procesar_auditoria_hardware(datos_nuevos, "uuid-1", "TEST-PC", secciones=("monitores",))
         assert len(cambios) >= 1
+        assert cambios[0].tipo_evento == "agregado"
         mock_emit.assert_called_once()
         mock_guardar.assert_called_once()
 
 
 def test_emit_fallido_no_guarda_snapshot():
     snap_ant = construir_snapshot_actual(_datos_pc_base(), ("monitores",))
-    datos_nuevos = _datos_pc_base(monitores=[])
+    datos_nuevos = _datos_pc_base(monitores=[
+        {"nombre": "LG 24", "numero_serie": "ABC", "fabricante": "LG", "pulgadas": 24},
+        {"nombre": "Samsung", "numero_serie": "NEW", "fabricante": "Samsung", "pulgadas": 27},
+    ])
 
     with patch("src.core.hardware_snapshot.cargar", return_value=snap_ant), \
          patch("src.core.hardware_snapshot.guardar", return_value=True) as mock_guardar, \
@@ -92,7 +99,10 @@ def test_seccion_nueva_baseline_sin_eventos():
 
 def test_guardar_fallido_tras_emit():
     snap_ant = construir_snapshot_actual(_datos_pc_base(), ("monitores",))
-    datos_nuevos = _datos_pc_base(monitores=[])
+    datos_nuevos = _datos_pc_base(monitores=[
+        {"nombre": "LG 24", "numero_serie": "ABC", "fabricante": "LG", "pulgadas": 24},
+        {"nombre": "Samsung", "numero_serie": "NEW", "fabricante": "Samsung", "pulgadas": 27},
+    ])
 
     with patch("src.core.hardware_snapshot.cargar", return_value=snap_ant), \
          patch("src.core.hardware_snapshot.guardar", return_value=False), \

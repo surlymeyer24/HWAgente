@@ -16,7 +16,7 @@ from src.core.hardware_fingerprint import (
 
 # Campos volátiles que no disparan evento "modificado"
 _CAMPOS_IGNORAR: dict[str, frozenset[str]] = {
-    "monitor": frozenset({"resolucion"}),
+    "monitor": frozenset({"resolucion", "ultima_vez_visto"}),
     "disco": frozenset({"total_gb", "usado_gb", "libre_gb", "porcentaje_usado", "capacidad_gb"}),
     "ram": frozenset({"velocidad_mhz"}),
 }
@@ -84,7 +84,7 @@ def diff_procesador(anterior: dict | None, actual: dict | None) -> list[CambioHa
 def _payload_evento(item: dict | None) -> dict | None:
     if item is None:
         return None
-    return {k: v for k, v in item.items() if k != "fingerprint"}
+    return {k: v for k, v in item.items() if k not in ("fingerprint", "ultima_vez_visto")}
 
 
 def cambios_a_eventos_firestore(

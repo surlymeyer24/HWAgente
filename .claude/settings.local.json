@@ -9,7 +9,12 @@
       "Bash(ls \"C:\\\\Users\\\\Usr\\\\Documents\\\\Desarrollo\" | grep -i -E \"mini|agente|front\")",
       "Bash(find \"C:\\\\Users\\\\Usr\\\\Documents\\\\Desarrollo\" -maxdepth 3 -type d -iname \"*front*\" 2>/dev/null)",
       "Bash(find \"C:\\\\Users\\\\Usr\\\\Documents\" -maxdepth 5 -type d -iname \"*MiniAgente*Front*\" 2>/dev/null)",
-      "Bash(find \"D:\\\\\\\\\" -maxdepth 3 -type d -iname \"*miniagente*\" 2>/dev/null | head -10)"
+      "Bash(find \"D:\\\\\\\\\" -maxdepth 3 -type d -iname \"*miniagente*\" 2>/dev/null | head -10)",
+      "WebFetch(domain:hackaday.io)",
+      "Bash(python -m pytest tests/test_monitor_detector.py tests/test_hardware_audit.py tests/test_hardware_diff.py -v)",
+      "Bash(python -m pytest --tb=short)",
+      "Bash(python -m pytest tests/ -v)",
+      "Bash(python -m pytest tests/ -v --tb=short)"
     ]
   }
 }

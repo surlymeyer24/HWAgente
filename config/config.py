@@ -23,6 +23,7 @@ HARDWARE_AUDIT_ENABLED = True
 HARDWARE_AUDIT_TTL_DIAS = 90
 HARDWARE_AUDIT_LIMPIEZA_BATCH = 100
 HARDWARE_AUDIT_LIMPIEZA_INTERVALO_SEG = 86400  # 1 vez por día, junto a limpiar_logs_debug
+HARDWARE_MONITOR_AUSENCIA_HORAS = int(os.environ.get("HARDWARE_MONITOR_AUSENCIA_HORAS", "48"))
 
 # ---------------------------------------------------------------------------
 # SEGURIDAD — Módulo de actualización remota

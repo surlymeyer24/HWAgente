@@ -73,8 +73,8 @@ Detecta cambios no autorizados en componentes de PC y los reporta a Firestore (`
 
 | Aspecto | Detalle |
 |---------|---------|
-| **Estado actual (v5.9)** | Monitores, RAM, discos, procesador + limpieza TTL |
-| **Componentes** | `monitor`, `ram`, `disco`, `procesador` (`tipo_componente` en eventos) |
+| **Estado actual (v5.9)** | RAM, discos, procesador + limpieza TTL. Monitores desactivados temporalmente (estudio de sesiones en curso) |
+| **Componentes** | `ram`, `disco`, `procesador` (`tipo_componente` en eventos). `monitor` desactivado hasta definir estrategia con datos de sesión |
 | **Latencia** | ~5 min (ciclo del servicio) |
 | **Comparación** | 100% local: snapshot en `HKLM\SOFTWARE\AgenteBacar\hardware_snapshot` vs escaneo WMI |
 | **Primer arranque** | Baseline silencioso (0 eventos) |
@@ -102,6 +102,20 @@ Logs en `C:\agente_debug.txt`:
 | `AUDIT_CICLO` / `AUDIT_CPU_ARRANQUE` | Resumen por ciclo o arranque |
 
 Guía de piloto (5–10 PCs): `docs/PILOTO_AUDITORIA_HARDWARE.md`
+
+### Tracking de sesión (estudio de bloqueo)
+
+Recolecta datos sobre el estado de sesión de cada PC para determinar si las máquinas se bloquean automáticamente. Estos datos informarán la estrategia de detección de monitores.
+
+| Campo en Firestore | Contenido |
+|---------------------|-----------|
+| `sesion_estado` | `activa` (desbloqueada), `bloqueada` (pantalla de bloqueo), `sin_usuario` (sin sesión de consola) |
+| `sesion_bloqueo_auto_min` | Timeout de bloqueo automático configurado (GPO o screensaver seguro), en minutos. `null` si no hay bloqueo automático |
+| `sesion_resumen_hoy` | Resumen diario: `fecha`, `horas_activa`, `horas_bloqueada`, `horas_sin_usuario`, `transiciones` (cantidad de bloqueos/desbloqueos), `max_horas_activa_continua` |
+
+Detección: `LogonUI.exe` corriendo = pantalla bloqueada. Funciona desde el servicio (Session 0) vía `psutil.process_iter`. Timeout de bloqueo leído de `HKLM\..\Policies\System\InactivityTimeoutSecs` (GPO) y `HKEY_USERS\<SID>\Control Panel\Desktop\ScreenSaveTimeOut` (screensaver seguro).
+
+Módulo: `src/core/session_tracker.py`
 
 ### Auto-actualización
 
@@ -262,7 +276,8 @@ MiniAgente/
 │   │   ├── auto_update.py       # Mecanismo de auto-actualización
 │   │   ├── windows_updates.py   # Gestión de Windows Updates
 │   │   ├── software_critico.py  # Detección de browsers, Office, antivirus
-│   │   └── programas_instalados.py  # Listado de programas desde el registro (Uninstall keys)
+│   │   ├── programas_instalados.py  # Listado de programas desde el registro (Uninstall keys)
+│   │   └── session_tracker.py      # Tracking de estado de sesión (estudio de bloqueo)
 │   └── database/
 │       └── firebase_client.py   # Integración con Firestore, comandos remotos
 ├── tests/

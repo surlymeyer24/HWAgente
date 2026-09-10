@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from config.config import HARDWARE_AUDIT_ENABLED, HARDWARE_AUDIT_TTL_DIAS
+from config.config import HARDWARE_AUDIT_ENABLED, HARDWARE_AUDIT_TTL_DIAS, HARDWARE_MONITOR_AUSENCIA_HORAS
 from src.core import hardware_snapshot
 from src.core.hardware_diff import (
     CambioHardware,
@@ -19,7 +19,7 @@ from src.core.detectores.procesador_detector import detectar_cambios_procesador
 from src.core.detectores.ram_detector import detectar_cambios_ram
 from src.core.scanner import obtener_secciones_auditoria
 
-SECCIONES_CICLO = ("monitores", "ram", "discos")
+SECCIONES_CICLO = ("ram", "discos")  # monitores desactivado hasta definir estrategia con datos de sesión
 SECCIONES_MONITORES = ("monitores",)
 SECCIONES_ARRANQUE = ("procesador",)
 
@@ -31,7 +31,6 @@ _SECCION_A_TIPO = {
 }
 
 _DETECTORES_LISTA = {
-    "monitores": detectar_cambios_monitores,
     "ram": detectar_cambios_ram,
     "discos": detectar_cambios_discos,
 }
@@ -82,14 +81,25 @@ def detectar_cambios(
     snapshot_anterior: dict,
     snapshot_actual: dict,
     secciones: tuple,
-) -> list[CambioHardware]:
-    """Combina diffs por sección; retorna cambios detectados (sin escribir)."""
+) -> tuple[list[CambioHardware], list[dict] | None]:
+    """Combina diffs por seccion; retorna (cambios, monitores_actualizados).
+
+    monitores_actualizados es None si monitores no fue procesado.
+    """
     cambios: list[CambioHardware] = []
+    monitores_actualizados: list[dict] | None = None
 
     for sec in secciones:
         if not _seccion_en_snapshot(snapshot_anterior, sec):
             continue
-        if sec == "procesador":
+        if sec == "monitores":
+            cambios_mon, monitores_actualizados = detectar_cambios_monitores(
+                snapshot_anterior.get("monitores") or [],
+                snapshot_actual.get("monitores") or [],
+                umbral_horas=HARDWARE_MONITOR_AUSENCIA_HORAS,
+            )
+            cambios.extend(cambios_mon)
+        elif sec == "procesador":
             cambios.extend(
                 detectar_cambios_procesador(
                     snapshot_anterior.get("procesador"),
@@ -106,7 +116,7 @@ def detectar_cambios(
             act = snapshot_actual.get(sec) or []
             cambios.extend(diff_listas(tipo, ant, act))
 
-    return cambios
+    return cambios, monitores_actualizados
 
 
 def _emitir_si_hay(eventos_raw: list[CambioHardware], uuid: str, hostname: str, version_agente: str) -> bool:
@@ -158,7 +168,7 @@ def procesar_auditoria_hardware(
         return []
 
     try:
-        cambios = detectar_cambios(snapshot_anterior, snapshot_actual, secciones)
+        cambios, monitores_actualizados = detectar_cambios(snapshot_anterior, snapshot_actual, secciones)
     except Exception as e:
         _audit_log(f"AUDIT_ERROR — detectar cambios: {type(e).__name__}: {e}")
         return []
@@ -173,6 +183,8 @@ def procesar_auditoria_hardware(
             return cambios
 
     snapshot_final = _merge_snapshots(snapshot_anterior, snapshot_actual, secciones)
+    if monitores_actualizados is not None:
+        snapshot_final["monitores"] = monitores_actualizados
     if not hardware_snapshot.guardar(snapshot_final):
         if cambios:
             _audit_log(
