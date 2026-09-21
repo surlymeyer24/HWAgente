@@ -17,7 +17,7 @@ from src.core.detectores.disco_detector import detectar_cambios_discos
 from src.core.detectores.monitor_detector import detectar_cambios_monitores
 from src.core.detectores.procesador_detector import detectar_cambios_procesador
 from src.core.detectores.ram_detector import detectar_cambios_ram
-from src.core.scanner import obtener_secciones_auditoria
+from src.core.scanner import es_lectura_cpu_degradada, obtener_secciones_auditoria
 
 SECCIONES_CICLO = ("ram", "discos")  # monitores desactivado hasta definir estrategia con datos de sesión
 SECCIONES_MONITORES = ("monitores",)
@@ -160,15 +160,33 @@ def procesar_auditoria_hardware(
         _audit_log(f"AUDIT_ERROR — cargar snapshot: {type(e).__name__}: {e}")
         return []
 
+    secciones_efectivas = list(secciones)
+    if "procesador" in secciones_efectivas:
+        proc_act = snapshot_actual.get("procesador")
+        if es_lectura_cpu_degradada(proc_act):
+            origen = (proc_act or {}).get("origen_deteccion") or "?"
+            nombre = ((proc_act or {}).get("nombre_completo") or "")[:80]
+            _audit_log(
+                f"AUDIT_CPU_DEGRADADA — origen={origen} nombre={nombre}; "
+                "no se emite evento ni se pisa snapshot de procesador"
+            )
+            snapshot_actual.pop("procesador", None)
+            secciones_efectivas = [s for s in secciones_efectivas if s != "procesador"]
+
+    if not secciones_efectivas:
+        return []
+
     if snapshot_anterior is None:
         if hardware_snapshot.guardar(snapshot_actual):
-            _audit_log(f"AUDIT_BASELINE — secciones={','.join(secciones)} uuid={uuid}")
+            _audit_log(f"AUDIT_BASELINE — secciones={','.join(secciones_efectivas)} uuid={uuid}")
         else:
             _audit_log(f"AUDIT_BASELINE_FAIL — uuid={uuid}")
         return []
 
     try:
-        cambios, monitores_actualizados = detectar_cambios(snapshot_anterior, snapshot_actual, secciones)
+        cambios, monitores_actualizados = detectar_cambios(
+            snapshot_anterior, snapshot_actual, tuple(secciones_efectivas)
+        )
     except Exception as e:
         _audit_log(f"AUDIT_ERROR — detectar cambios: {type(e).__name__}: {e}")
         return []
@@ -182,7 +200,7 @@ def procesar_auditoria_hardware(
             )
             return cambios
 
-    snapshot_final = _merge_snapshots(snapshot_anterior, snapshot_actual, secciones)
+    snapshot_final = _merge_snapshots(snapshot_anterior, snapshot_actual, tuple(secciones_efectivas))
     if monitores_actualizados is not None:
         snapshot_final["monitores"] = monitores_actualizados
     if not hardware_snapshot.guardar(snapshot_final):

@@ -133,57 +133,101 @@ def obtener_windows_version_detallada():
         return {}
 
 
+def _cpu_log(mensaje: str) -> None:
+    """Log de detección CPU: archivo local + Firestore debug si está disponible."""
+    texto = f"[CPU] {mensaje}"
+    try:
+        from src.database.firebase_client import log_debug
+        log_debug(texto)
+    except Exception:
+        try:
+            path = "C:\\agente_debug.txt" if os.path.exists("C:\\") else "agente_debug.txt"
+            with open(path, "a", encoding="utf-8") as f:
+                f.write(f"{time.ctime()}: {texto}\n")
+        except Exception:
+            pass
+
+
+def _powershell_exe() -> str:
+    """Ruta absoluta a powershell.exe (servicio no depende del PATH)."""
+    system_root = os.environ.get("SystemRoot") or os.environ.get("WINDIR") or r"C:\Windows"
+    return os.path.join(system_root, "System32", "WindowsPowerShell", "v1.0", "powershell.exe")
+
+
+def es_nombre_cpu_degradado(nombre: str | None) -> bool:
+    """True si el nombre es PROCESSOR_IDENTIFIER (Family/Model/Stepping), no comercial."""
+    n = (nombre or "").strip().lower()
+    if not n or n == "desconocido":
+        return True
+    if "family" in n and "model" in n and "stepping" in n:
+        return True
+    if n.startswith("intel64 family") or n.startswith("amd64 family"):
+        return True
+    return False
+
+
+def es_lectura_cpu_degradada(proc: dict | None) -> bool:
+    """True si la lectura no es confiable para emitir cambios / pisar snapshot."""
+    if not proc:
+        return True
+    origen = (proc.get("origen_deteccion") or "").strip().lower()
+    if origen == "platform":
+        return True
+    return es_nombre_cpu_degradado(proc.get("nombre_completo"))
+
+
 def _obtener_procesador_wmi():
     """Consulta Win32_Processor vía PowerShell (mismo patrón que RAM)."""
     try:
         ps_script = r"""
-        $cpus = @(Get-CimInstance Win32_Processor -ErrorAction SilentlyContinue |
+        $cpus = @(Get-CimInstance Win32_Processor -ErrorAction Stop |
             Select-Object Name, Manufacturer, NumberOfCores, NumberOfLogicalProcessors, MaxClockSpeed)
         $cpus | ConvertTo-Json -Compress -Depth 3
         """
         resultado = subprocess.run(
-            ['powershell', '-NoProfile', '-Command', ps_script],
+            [_powershell_exe(), '-NoProfile', '-NonInteractive', '-Command', ps_script],
             capture_output=True,
             text=True,
             encoding='utf-8', errors='replace',
-            timeout=10,
+            timeout=25,
             creationflags=subprocess.CREATE_NO_WINDOW
         )
         if resultado.returncode != 0 or not resultado.stdout.strip():
+            err = (resultado.stderr or "").strip()[:300]
+            _cpu_log(f"WMI sin datos (rc={resultado.returncode}): {err or 'stdout vacío'}")
             return None
 
         datos = json.loads(resultado.stdout)
         cpus = _listar_wmi(datos)
         if not cpus:
+            _cpu_log("WMI devolvió JSON sin CPUs")
             return None
         return cpus[0]
+    except subprocess.TimeoutExpired:
+        _cpu_log("WMI timeout (25s) — típico en arranque lento del servicio")
+        return None
     except Exception as e:
-        print(f"⚠️ No se pudo obtener procesador vía WMI: {e}")
+        _cpu_log(f"WMI error: {type(e).__name__}: {e}")
         return None
 
 
 def _obtener_procesador_registro():
-    """Fallback: nombre del procesador desde el registro de Windows."""
-    try:
-        ps_script = (
-            "(Get-ItemProperty 'HKLM:\\HARDWARE\\DESCRIPTION\\System\\CentralProcessor\\0' "
-            "-ErrorAction SilentlyContinue).ProcessorNameString"
-        )
-        resultado = subprocess.run(
-            ['powershell', '-NoProfile', '-Command', ps_script],
-            capture_output=True,
-            text=True,
-            encoding='utf-8', errors='replace',
-            timeout=10,
-            creationflags=subprocess.CREATE_NO_WINDOW
-        )
-        if resultado.returncode != 0:
-            return None
-        nombre = (resultado.stdout or '').strip()
-        return nombre or None
-    except Exception as e:
-        print(f"⚠️ No se pudo obtener procesador vía registro: {e}")
-        return None
+    """Nombre comercial desde el registro (winreg in-process; sin depender de PowerShell)."""
+    if sys.platform == "win32":
+        try:
+            import winreg
+            with winreg.OpenKey(
+                winreg.HKEY_LOCAL_MACHINE,
+                r"HARDWARE\DESCRIPTION\System\CentralProcessor\0",
+            ) as key:
+                val, _ = winreg.QueryValueEx(key, "ProcessorNameString")
+            nombre = (val or "").strip() if val else ""
+            if nombre:
+                return nombre
+            _cpu_log("winreg ProcessorNameString vacío")
+        except Exception as e:
+            _cpu_log(f"winreg ProcessorNameString: {type(e).__name__}: {e}")
+    return None
 
 
 def _obtener_procesador_completo():
@@ -194,20 +238,33 @@ def _obtener_procesador_completo():
     nucleos_logicos = psutil.cpu_count(logical=True) or 0
     frecuencia_max_mhz = None
     nombre = None
+    origen = "desconocido"
 
     if raw_wmi:
-        nombre = (raw_wmi.get('Name') or '').strip()
+        candidato = (raw_wmi.get('Name') or '').strip()
         nucleos_fisicos = _int_wmi(raw_wmi.get('NumberOfCores'), nucleos_fisicos)
         nucleos_logicos = _int_wmi(raw_wmi.get('NumberOfLogicalProcessors'), nucleos_logicos)
         frec = _int_wmi(raw_wmi.get('MaxClockSpeed'), 0)
         if frec > 0:
             frecuencia_max_mhz = frec
+        if candidato and not es_nombre_cpu_degradado(candidato):
+            nombre = candidato
+            origen = "wmi"
+        elif candidato:
+            _cpu_log(f"WMI Name degradado, se ignora: {candidato[:80]}")
 
     if not nombre:
-        nombre = _obtener_procesador_registro()
+        nombre_reg = _obtener_procesador_registro()
+        if nombre_reg and not es_nombre_cpu_degradado(nombre_reg):
+            nombre = nombre_reg
+            origen = "registro"
+        elif nombre_reg:
+            _cpu_log(f"Registro degradado, se ignora: {nombre_reg[:80]}")
 
     if not nombre:
         nombre = (platform.processor() or '').strip()
+        origen = "platform"
+        _cpu_log(f"Fallback platform.processor(): {nombre[:80]}")
 
     parsed = parsear_procesador(nombre)
     nombre_completo = nombre or 'Desconocido'
@@ -221,6 +278,7 @@ def _obtener_procesador_completo():
         'nucleos_fisicos': nucleos_fisicos,
         'nucleos_logicos': nucleos_logicos,
         'frecuencia_max_mhz': frecuencia_max_mhz,
+        'origen_deteccion': origen,
     }
 
     return {
@@ -620,6 +678,7 @@ def obtener_secciones_auditoria(datos_pc: dict) -> dict:
             "nucleos_fisicos": proc.get("nucleos_fisicos") or datos_pc.get("nucleos_fisicos") or 0,
             "gama": proc.get("gama") or "",
             "modelo": proc.get("modelo") or "",
+            "origen_deteccion": proc.get("origen_deteccion") or "",
         }
 
     return {
